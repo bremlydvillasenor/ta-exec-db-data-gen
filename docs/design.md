@@ -126,10 +126,18 @@ requisition-level cap actually binding, forecast lift and reconciliation between
 summary grain, the risk-band behaviour under each THD selection, and planned demand
 reaching the future THD ceiling.
 
-Two of those need the assertion to be about counts rather than nulls, because the failure
+Quarantined applications are held out of every summary figure, not only the accepted-offer
+population: they train no yield and they contribute no funnel stage event, because they
+never reach the governed application fact. The funnel is where leaving them in would do
+more than inflate a count - the offer conversion takes its numerator from the governed
+acceptances, so a denominator that still contained them would divide two different
+populations.
+
+Three tests need the assertion to be about counts rather than nulls, because the failure
 they guard against is silent. Quarantined applications leaking into the yield's training
-population land in the denominator of an otherwise healthy segment, so the test compares
-each stage's trained row count with the governed population. An active candidate whose
+population, or into the funnel denominators, land inside otherwise healthy stage totals, so
+those tests compare each stage's row count with the governed population and also assert
+that the quarantine removes rows at every stage, which stops them passing vacuously. An active candidate whose
 segment and stage have no trained yield would forecast as zero, so `stage_yields` covers
 every combination the live pipeline contains and `expected_pipeline_fills` raises rather
 than substituting a zero.

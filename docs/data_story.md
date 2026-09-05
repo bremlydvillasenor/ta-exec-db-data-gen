@@ -8,9 +8,9 @@ will find. Figures are for the default seed (20260531).
 
 Where the contract states a population rule, the summary follows it, so these numbers can
 be compared with the governed marts instead of quietly differing from them: quarantined
-applications are held out, Time to Fill runs on non-cancelled requisitions, and the
-forecast uses the FCST-01..04 definitions including the segment fallback and the
-requisition-level cap.
+applications are held out of every figure, including the funnel stage counts and the
+forecast yield, Time to Fill runs on non-cancelled requisitions, and the forecast uses the
+FCST-01..04 definitions including the segment fallback and the requisition-level cap.
 
 ## 1. Demand keeps growing and gets rushed in mid-2025
 
@@ -120,6 +120,11 @@ in 6 days. Offer conversion (74%) counts acceptance events; the 238 offers later
 renege (166) or an employer rescind (72) remain successful conversions and remain in Time
 to Fill, but their seats are back in open demand. 88 requisitions visibly return from
 `filled` to `open` in the snapshot history because of this.
+
+Stage counts here exclude the four quarantined applications, which removes 4 completed
+events from every stage. The offer stage is the one place where this changes a ratio rather
+than only a count: its numerator is the governed acceptance count, so its denominator has to
+be the governed offer population as well.
 
 ## 6. Forecast: the active pipeline closes about a quarter of the shortfall
 

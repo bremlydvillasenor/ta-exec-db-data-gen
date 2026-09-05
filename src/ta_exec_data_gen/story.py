@@ -452,8 +452,13 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
     out["forecast_summary"] = _forecast_summary(forecast, as_of, cfg)
 
     # funnel: active snapshot, completed conversion, completed median days ------------------
-    stg = tables["ats_stage_history"].join(
-        tables["ats_application"].select("application_id", "application_status"), on="application_id"
+    # Quarantined applications are held out here too. They never reach the governed application
+    # fact, so their stage events are not part of the population the funnel describes; leaving
+    # them in would also give the offer stage a denominator its numerator does not share.
+    stg = (
+        tables["ats_stage_history"]
+        .join(quarantined.select("application_id"), on="application_id", how="anti")
+        .join(tables["ats_application"].select("application_id", "application_status"), on="application_id")
     )
     stg = stg.sort(["application_id", "stage_sequence"]).with_columns(
         next_stage=pl.col("stage_code").shift(-1).over("application_id")

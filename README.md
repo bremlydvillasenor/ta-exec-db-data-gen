@@ -27,7 +27,7 @@ uv sync --all-groups                 # Python 3.11+, installs polars, numpy, pyy
 uv run ta-gen generate               # writes data/raw/*.csv and runs source validation (about 10 s)
 uv run ta-gen validate               # re-runs the 83 source-level checks on data/raw
 uv run ta-gen summary                # prints the indicative data-story summary (never written to the outputs)
-uv run pytest                        # 35 tests on scaled-down runs (about 15 s)
+uv run pytest                        # 36 tests on scaled-down runs (about 15 s)
 uv run ruff check src tests
 ```
 

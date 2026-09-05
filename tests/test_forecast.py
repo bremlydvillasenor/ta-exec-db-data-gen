@@ -67,6 +67,32 @@ def test_quarantined_applications_do_not_train_the_yield_model(tables_medium, cf
         assert with_quarantined[stage] > expected, "the quarantine must actually remove rows at every stage"
 
 
+def test_quarantined_applications_do_not_enter_the_funnel_summary(tables_medium, cfg_medium):
+    """The funnel describes the governed stage-event population, so it drops the same rows.
+
+    Counting matters here for the same reason as the yield: the extra rows disappear into
+    healthy stage totals. The offer stage is the sharpest case - its numerator already came
+    from the governed acceptances, so leaving the rows in the denominator alone would make
+    the published conversion a ratio of two different populations.
+    """
+    quarantined = quarantined_applications(tables_medium).select("application_id")
+    completed = tables_medium["ats_stage_history"].filter(pl.col("stage_exited_date").is_not_null())
+    with_quarantined = dict(completed.group_by("stage_code").len().iter_rows())
+    governed = completed.join(quarantined, on="application_id", how="anti")
+    without = dict(governed.group_by("stage_code").len().iter_rows())
+
+    funnel = summarise(tables_medium, cfg_medium)["funnel_by_stage"]
+    published = dict(funnel.select("stage_code", "completed").iter_rows())
+    for stage, expected in without.items():
+        assert published[stage] == expected, f"{stage}: published {published[stage]}, governed population is {expected}"
+        assert with_quarantined[stage] > expected, "the quarantine must actually remove rows at every stage"
+
+    offer = funnel.filter(pl.col("stage_code") == "offer")
+    assert offer["advanced"].item() == accepted_offers(tables_medium).height, (
+        "offer conversion must divide governed acceptances by the governed offer population"
+    )
+
+
 def test_time_to_fill_population_follows_the_contract(tables_medium, cfg_medium):
     s = summarise(tables_medium, cfg_medium)
     steps = s["time_to_fill_population"]["applications"].to_list()
