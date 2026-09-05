@@ -171,6 +171,21 @@ class JobFamily(StrictModel):
     constraint_weights: dict[str, float]
 
 
+class StoryConfig(StrictModel):
+    """Governed reference values mirrored from ta-exec-db, used only by the story summary."""
+
+    forecast_min_segment_observations: int = Field(default=30, ge=1)
+    fill_rate_target: float = Field(default=0.90, ge=0, le=1)
+    risk_high_max_days: int = Field(default=7, ge=0)
+    risk_medium_max_days: int = Field(default=14, ge=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> StoryConfig:
+        if self.risk_high_max_days >= self.risk_medium_max_days:
+            raise ValueError("risk_high_max_days must be below risk_medium_max_days")
+        return self
+
+
 class GeneratorConfig(StrictModel):
     seed: int
     dates: DatesConfig
@@ -181,6 +196,7 @@ class GeneratorConfig(StrictModel):
     funnel: FunnelConfig
     offers: OffersConfig
     hr: HrConfig
+    story: StoryConfig = StoryConfig()
     business_units: list[BusinessUnit] = Field(min_length=1)
     business_unit_job_family_mix: dict[str, dict[str, float]]
     job_levels: list[JobLevel] = Field(min_length=1)

@@ -522,6 +522,46 @@ class Validator:
         self._expect_empty(
             "worker_event: record_created_date >= event_date", hr, pl.col("record_created_date") < pl.col("event_date")
         )
+
+        # candidate realism ------------------------------------------------------------------
+        # A candidate may apply to several requisitions, but one person cannot hold two jobs
+        # at once, nor keep interviewing elsewhere after taking a seat.
+        loss = pl.coalesce(pl.col("rescinded_date"), pl.col("renege_date"))
+        candidate_fills = (
+            cycles.filter(pl.col("accepted_date").is_not_null() & loss.is_null())
+            .join(app.select("application_id", "candidate_id"), on="application_id", how="left")
+            .select("candidate_id", "application_id")
+            .unique()
+        )
+        self._unique("application: candidate holds at most one active fill", candidate_fills, ["candidate_id"])
+        self._fail(
+            "application: candidate is not still applying while holding an active fill",
+            candidate_fills.select("candidate_id")
+            .unique()
+            .join(
+                app.filter(pl.col("application_status") == "active").select("candidate_id").unique(),
+                on="candidate_id",
+                how="inner",
+            ),
+        )
+        seat_taken = (
+            cycles.filter(pl.col("accepted_date").is_not_null() & loss.is_null())
+            .join(app.select("application_id", "candidate_id"), on="application_id", how="left")
+            .group_by("candidate_id")
+            .agg(seat_taken_date=pl.col("accepted_date").min())
+        )
+        self._expect_empty(
+            "application: candidate does not apply again after taking a seat",
+            app.join(seat_taken, on="candidate_id", how="inner"),
+            pl.col("application_date") > pl.col("seat_taken_date"),
+        )
+        self._unique(
+            "worker_event: candidate has at most one hire",
+            hires.join(app.select("application_id", "candidate_id"), on="application_id", how="left")
+            .select("candidate_id", "application_id")
+            .unique(),
+            ["candidate_id"],
+        )
         return self.results
 
 

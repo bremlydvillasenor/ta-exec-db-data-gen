@@ -68,7 +68,9 @@ def test_post_acceptance_outcomes_and_source_quirks(tables_medium, cfg_medium):
     )
     assert multi.filter((pl.col("versions") > 1) & (pl.col("cycles") == 1)).height > 0, "administrative revisions"
     assert multi.filter(pl.col("cycles") > 1).height == cfg_medium.offers.quarantine_case_count
-    assert acc.filter(pl.col("cycles") > 1)["lost"].all(), "ambiguous second cycles must not hold a seat"
+    # the ambiguous cases are held out of the governed population, not collapsed into it
+    assert acc.filter(pl.col("cycles") > 1).height == 0
+    assert acc.height + cfg_medium.offers.quarantine_case_count == multi.height
     assert set(ov["version_reason"].unique()) >= {"initial", "negotiation_revision", "start_date_revision"}
     assert (ov["offer_status"] == "superseded").sum() > 0
     hr = tables_medium["hr_worker_event"]

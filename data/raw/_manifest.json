@@ -1,6 +1,6 @@
 {
   "seed": 20260531,
-  "config_fingerprint": "96c2c5b69799f188",
+  "config_fingerprint": "330ad06734ee65cb",
   "as_of_date": "2026-05-31",
   "history_start_date": "2024-01-01",
   "future_thd_end_date": "2027-05-31",
@@ -36,7 +36,7 @@
       "file": "ats_job_level.csv"
     },
     "ats_requisition_snapshot": {
-      "rows": 20196,
+      "rows": 20117,
       "columns": [
         "snapshot_date",
         "requisition_id",
@@ -59,7 +59,7 @@
       "file": "ats_requisition_snapshot.csv"
     },
     "ats_application": {
-      "rows": 74096,
+      "rows": 74131,
       "columns": [
         "application_id",
         "candidate_id",
@@ -74,7 +74,7 @@
       "file": "ats_application.csv"
     },
     "ats_stage_history": {
-      "rows": 155902,
+      "rows": 155899,
       "columns": [
         "stage_history_id",
         "application_id",
@@ -86,7 +86,7 @@
       "file": "ats_stage_history.csv"
     },
     "ats_offer_version": {
-      "rows": 6676,
+      "rows": 6631,
       "columns": [
         "offer_version_id",
         "offer_id",
@@ -110,7 +110,7 @@
       "file": "ats_offer_version.csv"
     },
     "hr_worker_event": {
-      "rows": 4041,
+      "rows": 4018,
       "columns": [
         "worker_event_id",
         "worker_id",
