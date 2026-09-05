@@ -83,8 +83,11 @@ requisitions are processed in a fixed order.
     produced (the contract keeps candidates out of scope); candidate ids are reused across
     requisitions to make the (candidate, requisition) uniqueness rule meaningful. Reuse is
     constrained so the source never describes an impossible person: no candidate holds two
-    live acceptances, none is hired twice, and none is still an active candidate elsewhere
-    after taking a seat. A merge that would break one of those is undone and the
+    live acceptances, none is hired twice, none is still an active candidate elsewhere after
+    taking a seat, and none submits a new application after the day they accepted one. That
+    last rule is the one that needs the application date rather than the final status: an
+    application that was in flight before the acceptance and was later rejected is fine, but
+    one *submitted* afterwards is not. A merge that would break one of those is undone and the
     application keeps its own candidate, which is why the realised reuse rate is a little
     below `funnel.candidate_pool_reuse`. Nothing in the fact grain requires this - it keeps
     hire counts and attrition analysis at source level believable.
@@ -103,12 +106,12 @@ requisitions are processed in a fixed order.
 
 ## Validation split
 
-`ta-gen validate` (82 checks) proves the source is internally consistent: keys, foreign
+`ta-gen validate` (83 checks) proves the source is internally consistent: keys, foreign
 keys, vocabularies, no actual date after the as-of date, target dates inside the horizon,
 TOAD between approval and THD, seat quantities and status consistency on every snapshot,
 the identity `requested = active fills + openings` on the latest snapshot derived from the
 offer events, one open stage exactly for active applications, stage chaining, offer status
-versus dates, HR starts only for accepted offers that were not lost, and the three
+versus dates, HR starts only for accepted offers that were not lost, and the four
 candidate-realism rules in assumption 10. The contract's analytics rules (section 12 of
 `spec.md`) are dbt tests and are not duplicated here.
 
@@ -122,6 +125,14 @@ Fill population, the stage-yield fallback order and floor, per-segment yield var
 requisition-level cap actually binding, forecast lift and reconciliation between month and
 summary grain, the risk-band behaviour under each THD selection, and planned demand
 reaching the future THD ceiling.
+
+Two of those need the assertion to be about counts rather than nulls, because the failure
+they guard against is silent. Quarantined applications leaking into the yield's training
+population land in the denominator of an otherwise healthy segment, so the test compares
+each stage's trained row count with the governed population. An active candidate whose
+segment and stage have no trained yield would forecast as zero, so `stage_yields` covers
+every combination the live pipeline contains and `expected_pipeline_fills` raises rather
+than substituting a zero.
 
 
 ## Open questions for the contract (`ta-exec-db`)

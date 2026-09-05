@@ -128,8 +128,8 @@ who are active on the as-of date, and caps each requisition at its remaining ope
 
 | THD selection | Requested | Filled | Expected pipeline fills | Fill Rate | Forecast Fill Rate |
 |---|---:|---:|---:|---:|---:|
-| All THD | 3,988 | 3,480 | 119.2 | 87.3% | 90.3% |
-| Jan-May 2026 | 725 | 623 | 11.0 | 85.9% | 87.4% |
+| All THD | 3,988 | 3,480 | 119.3 | 87.3% | 90.3% |
+| Jan-May 2026 | 725 | 623 | 11.0 | 85.9% | 87.5% |
 | THD on or before as-of | 3,310 | 3,143 | 18.8 | 95.0% | 95.5% |
 | THD after as-of | 678 | 337 | 100.4 | 49.7% | 64.5% |
 
@@ -172,8 +172,9 @@ median). By business unit, Sales runs at about 12% and Engineering under 5%.
 * Duplicate HR rows: re-sent hire events and later-dated second termination rows.
 * 496 requisitions have their THD and TOAD pushed out in later snapshots; the latest
   snapshot on or before the as-of date is the reporting state.
-* 4,080 candidates applied to more than one requisition. No candidate holds two live
-  acceptances, is hired twice, or keeps applying elsewhere after taking a seat.
+* 3,895 candidates applied to more than one requisition. No candidate holds two live
+  acceptances, is hired twice, keeps an application active elsewhere after taking a seat,
+  or applies again once they have accepted one.
 
 ## 10. Reconciling with the wireframe
 

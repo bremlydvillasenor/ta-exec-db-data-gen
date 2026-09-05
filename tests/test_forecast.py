@@ -7,10 +7,13 @@ source-level check, so they are asserted here rather than left to inspection.
 import datetime as dt
 
 import polars as pl
+import pytest
 
 from ta_exec_data_gen.story import (
+    SEGMENT_KEYS,
     _latest_snapshot,
     accepted_offers,
+    active_pipeline,
     expected_pipeline_fills,
     quarantined_applications,
     stage_yields,
@@ -38,9 +41,30 @@ def test_quarantined_applications_never_reach_a_governed_figure(tables_medium, c
     assert governed.join(quarantined, on="application_id", how="semi").height == 0
     assert (governed["cycles"] == 1).all(), "a governed acceptance is one cycle"
 
-    # and the yield model must not train on them either
+
+def test_quarantined_applications_do_not_train_the_yield_model(tables_medium, cfg_medium):
+    """The yield is defined on the governed application fact, which quarantined rows never reach.
+
+    A null-yield check cannot see this: the leaked rows land in the denominator of an
+    otherwise healthy segment, so the only way to catch it is to count the training rows.
+    """
     latest, yields, _ = _parts(tables_medium, cfg_medium)
-    assert yields["applied_yield"].null_count() == 0
+    quarantined = quarantined_applications(tables_medium).select("application_id")
+    finished = (
+        tables_medium["ats_stage_history"]
+        .select("application_id", "stage_code")
+        .unique()
+        .join(tables_medium["ats_application"].select("application_id", "application_status"), on="application_id")
+        .filter(pl.col("application_status") != "active")
+    )
+    with_quarantined = dict(finished.group_by("stage_code").len().iter_rows())
+    without = dict(
+        finished.join(quarantined, on="application_id", how="anti").group_by("stage_code").len().iter_rows()
+    )
+    trained = dict(yields.select("stage_code", "n_all").unique().iter_rows())
+    for stage, expected in without.items():
+        assert trained[stage] == expected, f"{stage}: trained on {trained[stage]}, governed population is {expected}"
+        assert with_quarantined[stage] > expected, "the quarantine must actually remove rows at every stage"
 
 
 def test_time_to_fill_population_follows_the_contract(tables_medium, cfg_medium):
@@ -90,6 +114,28 @@ def test_yield_rises_with_stage_depth(tables_medium, cfg_medium):
 
 
 # ---------------------------------------------------------------- FCST-02 requisition cap
+def test_every_active_candidate_gets_a_yield_and_a_gap_is_an_error(tables_medium, cfg_medium):
+    """A candidate the model cannot answer for must fail loudly, not quietly forecast zero."""
+    latest, yields, _ = _parts(tables_medium, cfg_medium)
+    active = active_pipeline(tables_medium, latest)
+    assert active.height > 0
+    matched = active.join(
+        yields.select(*SEGMENT_KEYS, "stage_code", "applied_yield"), on=[*SEGMENT_KEYS, "stage_code"]
+    )
+    assert matched.height == active.height, "the fallback must cover every segment the pipeline contains"
+    assert matched["applied_yield"].null_count() == 0
+
+    # the model is asked about combinations history alone does not contain
+    trained_only = stage_yields(tables_medium, latest, cfg_medium)
+    assert trained_only.height >= active.select(*SEGMENT_KEYS, "stage_code").unique().height
+
+    needed = active.select(*SEGMENT_KEYS, "stage_code").unique().head(1)
+    pruned = yields.join(needed, on=[*SEGMENT_KEYS, "stage_code"], how="anti")
+    assert pruned.height == yields.height - 1
+    with pytest.raises(ValueError, match="no stage yield"):
+        expected_pipeline_fills(tables_medium, latest, pruned)
+
+
 def test_expected_pipeline_fills_are_capped_at_remaining_openings(tables_medium, cfg_medium):
     latest, _, fills = _parts(tables_medium, cfg_medium)
     open_reqs = latest.filter(pl.col("requisition_status") == "open").select("requisition_id", "openings_position")

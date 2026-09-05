@@ -46,29 +46,44 @@ def _day_to_date(idx: DayIndex, *columns: str) -> list[pl.Expr]:
     ]
 
 
-def _split_conflicting_reuse(candidate: np.ndarray, holds_seat: np.ndarray, in_pipeline: np.ndarray) -> np.ndarray:
+def _split_conflicting_reuse(
+    candidate: np.ndarray,
+    holds_seat: np.ndarray,
+    in_pipeline: np.ndarray,
+    applied_on: np.ndarray,
+    seat_taken_on: np.ndarray,
+) -> np.ndarray:
     """Undo any candidate merge that would make one person hold two jobs at once.
 
     Reusing a candidate across requisitions is realistic, but a real person cannot hold two
-    live acceptances at the same time, and cannot still be an active candidate somewhere
-    while already holding one. Applications are visited in application order; the one that
-    would create the conflict is handed back its own candidate, so the reuse rate drops
-    slightly instead of the source data describing an impossible person.
+    live acceptances at the same time, cannot still be an active candidate somewhere while
+    already holding one, and does not start applying again after taking a seat. Applications
+    are visited in application-date order; the one that would create the conflict is handed
+    back its own candidate, so the reuse rate drops slightly instead of the source data
+    describing an impossible person.
+
+    Visiting in application-date order is what makes one pass enough: an acceptance never
+    precedes its own application, so a merge accepted now can only ever be invalidated by an
+    earlier application, and those have already been seen.
     """
     resolved = candidate.copy()
-    seat: dict[int, bool] = {}
     pipeline: dict[int, bool] = {}
+    seat_day: dict[int, int] = {}
     for i in range(resolved.size):
         key = int(resolved[i])
         if key != i:
-            conflict = (holds_seat[i] and (seat.get(key, False) or pipeline.get(key, False))) or (
-                in_pipeline[i] and seat.get(key, False)
+            took_seat = seat_day.get(key)
+            conflict = (
+                (holds_seat[i] and (took_seat is not None or pipeline.get(key, False)))
+                or (in_pipeline[i] and took_seat is not None)
+                or (took_seat is not None and applied_on[i] > took_seat)
             )
             if conflict:
                 resolved[i] = i
                 key = i
         if holds_seat[i]:
-            seat[key] = True
+            taken = int(seat_taken_on[i])
+            seat_day[key] = min(seat_day.get(key, taken), taken)
         if in_pipeline[i]:
             pipeline[key] = True
     return resolved
@@ -96,9 +111,15 @@ def assign_candidates(apps: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory
         (apps["offer_rescinded_day"].to_numpy() == NO_DAY) & (apps["candidate_renege_day"].to_numpy() == NO_DAY)
     )
     in_pipeline = (apps["status"] == "active").to_numpy()
+    applied_on = apps["application_day"].to_numpy()
+    seat_taken_on = apps["offer_accepted_day"].to_numpy()
     row_of_app = np.argsort(apps["app_idx"].to_numpy(), kind="stable")
     fixed = _split_conflicting_reuse(
-        apps["candidate_raw"].to_numpy()[row_of_app], holds_seat[row_of_app], in_pipeline[row_of_app]
+        apps["candidate_raw"].to_numpy()[row_of_app],
+        holds_seat[row_of_app],
+        in_pipeline[row_of_app],
+        applied_on[row_of_app],
+        seat_taken_on[row_of_app],
     )
     resolved = np.empty_like(fixed)
     resolved[row_of_app] = fixed

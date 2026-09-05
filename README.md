@@ -25,9 +25,9 @@ risk bands, no cohort maturity, no stage yields, no KPIs. Those derivations belo
 ```bash
 uv sync --all-groups                 # Python 3.11+, installs polars, numpy, pyyaml, pydantic (+ pytest, ruff)
 uv run ta-gen generate               # writes data/raw/*.csv and runs source validation (about 10 s)
-uv run ta-gen validate               # re-runs the 82 source-level checks on data/raw
+uv run ta-gen validate               # re-runs the 83 source-level checks on data/raw
 uv run ta-gen summary                # prints the indicative data-story summary (never written to the outputs)
-uv run pytest                        # 33 tests on scaled-down runs (about 15 s)
+uv run pytest                        # 35 tests on scaled-down runs (about 15 s)
 uv run ruff check src tests
 ```
 
@@ -79,7 +79,7 @@ visual's default Target Hire Date selection cannot show anything but the Missed 
 5. **Snapshots** (`snapshots.py`): month-end requisition extracts with status, requested /
    open / cancelled seats, re-baselined target dates and a primary hiring constraint chosen
    from evidence in the pipeline.
-6. **Validation** (`validate.py`): 82 source-level checks (keys, referential integrity, date
+6. **Validation** (`validate.py`): 83 source-level checks (keys, referential integrity, date
    order, nothing after the as-of date, seat identity on every snapshot, offer / status
    consistency, HR consistency, and candidate realism - nobody holds two live acceptances,
    is hired twice, or keeps applying after taking a seat).

@@ -86,20 +86,43 @@ def accepted_offers(tables: dict[str, pl.DataFrame], *, include_quarantined: boo
     return acc.join(quarantined_applications(tables).select("application_id"), on="application_id", how="anti")
 
 
+SEGMENT_KEYS = ["business_unit_code", "job_family_code", "job_level_code"]
+
+
+def active_pipeline(tables: dict[str, pl.DataFrame], latest: pl.DataFrame) -> pl.DataFrame:
+    """Candidates still in play on the as-of date, on open requisitions, with their segment and stage.
+
+    This is the population the forecast predicts, so it also decides which segment-and-stage
+    combinations the yield model must be able to answer for.
+    """
+    segments = latest.select("requisition_id", *SEGMENT_KEYS, "requisition_status", "openings_position")
+    return (
+        tables["ats_application"]
+        .filter(pl.col("application_status") == "active")
+        .select("application_id", "requisition_id", stage_code=pl.col("current_stage_code"))
+        .join(segments, on="requisition_id")
+        .filter(pl.col("requisition_status") == "open")
+    )
+
+
 def stage_yields(tables: dict[str, pl.DataFrame], latest: pl.DataFrame, cfg: GeneratorConfig) -> pl.DataFrame:
     """FCST-01 stage-to-active-fill yield per segment and stage, with the documented fallback.
 
     The training target is the *active fill* - an acceptance that was not later rescinded or
     reneged - so the forecast stays on the same definition as filled positions. Only
     applications with a final outcome train the model; active candidates are what the model
-    is later asked to predict. A segment grain is used only when it has at least
-    `story.forecast_min_segment_observations` observations, otherwise the next coarser grain
-    in `YIELD_FALLBACK` applies.
+    is later asked to predict. Quarantined applications train nothing: they never reach the
+    governed application fact, which is the source this yield is defined on. A segment grain
+    is used only when it has at least `story.forecast_min_segment_observations` observations,
+    otherwise the next coarser grain in `YIELD_FALLBACK` applies.
+
+    Every combination the active pipeline needs gets a row, whether or not history has one at
+    that grain, so the caller never has to invent a yield for an unmatched candidate.
     """
     min_obs = cfg.story.forecast_min_segment_observations
     acc = accepted_offers(tables)
     active_fill = acc.filter(~pl.col("lost")).select("application_id").with_columns(is_active_fill=pl.lit(True))
-    segments = latest.select("requisition_id", "business_unit_code", "job_family_code", "job_level_code")
+    segments = latest.select("requisition_id", *SEGMENT_KEYS)
     entered = (
         tables["ats_stage_history"]
         .select("application_id", "stage_code")
@@ -109,11 +132,17 @@ def stage_yields(tables: dict[str, pl.DataFrame], latest: pl.DataFrame, cfg: Gen
             on="application_id",
         )
         .filter(pl.col("application_status") != "active")
+        .join(quarantined_applications(tables).select("application_id"), on="application_id", how="anti")
         .join(segments, on="requisition_id")
         .join(active_fill, on="application_id", how="left")
         .with_columns(pl.col("is_active_fill").fill_null(False))
     )
-    grain = entered.select("business_unit_code", "job_family_code", "job_level_code", "stage_code").unique()
+    grain = pl.concat(
+        [
+            entered.select(*SEGMENT_KEYS, "stage_code"),
+            active_pipeline(tables, latest).select(*SEGMENT_KEYS, "stage_code"),
+        ]
+    ).unique()
     for name, keys in YIELD_FALLBACK:
         level = entered.group_by([*keys, "stage_code"]).agg(
             **{
@@ -130,34 +159,38 @@ def stage_yields(tables: dict[str, pl.DataFrame], latest: pl.DataFrame, cfg: Gen
         applied_level = pl.when(usable).then(pl.lit(name)).otherwise(applied_level)
         applied_yield = pl.when(usable).then(pl.col(f"fills_{name}") / pl.col(f"n_{name}")).otherwise(applied_yield)
         applied_obs = pl.when(usable).then(pl.col(f"n_{name}")).otherwise(applied_obs)
-    return grain.with_columns(
+    out = grain.with_columns(
         yield_segment_level=applied_level,
         applied_yield=applied_yield,
         applied_observations=applied_obs,
-    ).sort(["business_unit_code", "job_family_code", "job_level_code", "stage_code"])
+    ).sort([*SEGMENT_KEYS, "stage_code"])
+    unresolved = out.filter(pl.col("applied_yield").is_null())
+    if unresolved.height:
+        raise ValueError(
+            f"{unresolved.height} segment/stage combinations have no yield at any fallback level; "
+            f"the coarsest level has fewer than {min_obs} observations for stages "
+            f"{sorted(unresolved['stage_code'].unique())}"
+        )
+    return out
 
 
 def expected_pipeline_fills(
     tables: dict[str, pl.DataFrame], latest: pl.DataFrame, yields: pl.DataFrame
 ) -> pl.DataFrame:
     """FCST-02: active-pipeline yield summed per requisition and capped at its remaining openings."""
-    segments = latest.select(
-        "requisition_id", "business_unit_code", "job_family_code", "job_level_code", "requisition_status",
-        "openings_position",
+    segments = latest.select("requisition_id", *SEGMENT_KEYS, "requisition_status", "openings_position")
+    active = active_pipeline(tables, latest).join(
+        yields.select(*SEGMENT_KEYS, "stage_code", "applied_yield"),
+        on=[*SEGMENT_KEYS, "stage_code"],
+        how="left",
     )
-    active = (
-        tables["ats_application"]
-        .filter(pl.col("application_status") == "active")
-        .select("application_id", "requisition_id", stage_code=pl.col("current_stage_code"))
-        .join(segments, on="requisition_id")
-        .filter(pl.col("requisition_status") == "open")
-        .join(
-            yields.select("business_unit_code", "job_family_code", "job_level_code", "stage_code", "applied_yield"),
-            on=["business_unit_code", "job_family_code", "job_level_code", "stage_code"],
-            how="left",
+    # An unmatched candidate would silently understate the forecast, so it is an error, not a zero.
+    unmatched = active.filter(pl.col("applied_yield").is_null())
+    if unmatched.height:
+        raise ValueError(
+            f"{unmatched.height} active candidates have no stage yield for their segment; "
+            "the fallback hierarchy must cover every combination the pipeline contains"
         )
-        .with_columns(pl.col("applied_yield").fill_null(0.0))
-    )
     raw = active.group_by("requisition_id").agg(
         active_candidates=pl.len(), uncapped_expected_fills=pl.col("applied_yield").sum()
     )
