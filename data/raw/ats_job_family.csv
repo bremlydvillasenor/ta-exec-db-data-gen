@@ -1,0 +1,11 @@
+job_family_code,job_family_name,sort_order,is_active
+SWE,Software Engineering,1,true
+DAT,Data & Analytics,2,true
+ITS,IT & Security,3,true
+PDM,Product Management,4,true
+MKT,Marketing,5,true
+SLS,Sales,6,true
+CSM,Customer Success,7,true
+OPS,Operations,8,true
+FIN,Finance,9,true
+PPL,People & Talent,10,true

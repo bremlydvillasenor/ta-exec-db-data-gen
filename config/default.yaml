@@ -1,0 +1,278 @@
+# Default generation configuration for the TA Executive Dashboard synthetic sources.
+# Every number that shapes the data story lives here. The generator is fully
+# deterministic for a given (seed, config) pair.
+
+seed: 20260531
+
+dates:
+  history_start: 2024-01-01      # first day any actual ATS / HR event may occur
+  as_of: 2026-05-31              # reporting as-of date; no actual event after this day
+  future_thd_end: 2027-05-31     # latest Target Hire Date preserved as planned demand
+
+output:
+  directory: data/raw
+
+# ------------------------------------------------------------------ demand plan
+demand:
+  base_positions_per_month: 100  # positions with THD in Jan 2024
+  monthly_growth_rate: 0.015     # compounding month over month
+  seasonality: [1.15, 1.10, 1.05, 1.00, 0.95, 0.90, 0.85, 0.90, 1.05, 1.00, 0.90, 0.80]  # Jan..Dec
+  # THD - approval date, in days. Most requisitions are approved 1-5 months before THD;
+  # a minority are approved much earlier as part of the annual plan.
+  approval_lead_days: {min: 25, mode: 60, max: 200}
+  early_plan_share: 0.15
+  early_plan_lead_days: {min: 150, mode: 240, max: 365}
+  # Minimum gap between approval and THD after clamping to history_start.
+  min_thd_gap_days: 21
+
+# ------------------------------------------------------------------ story episodes
+episodes:
+  hiring_surge:                  # rushed growth hiring: faster cycles, looser bar, more early exits
+    start: 2025-05-01
+    end: 2025-08-31
+    demand_multiplier: 1.30
+    cycle_time_multiplier: 0.78
+    pass_rate_multiplier: 1.12
+    early_attrition_multiplier: 2.30
+  hiring_freeze:                 # budget freeze: cancellations and employer rescinds spike
+    start: 2024-10-01
+    end: 2024-11-30
+    cancellation_probability: 0.22
+    rescind_multiplier: 6.0
+
+# ------------------------------------------------------------------ requisition lifecycle
+requisitions:
+  base_cancellation_probability: 0.05
+  cancellation_day_range: [15, 120]          # days after approval
+  stale_cancel_probability: 0.65             # give up on a requisition still open long after THD
+  stale_cancel_days_after_thd: [120, 240]
+  partial_cancel_probability: 0.07           # multi-seat requisitions that lose some seats
+  partial_cancel_day_range: [60, 200]
+  rebaseline_probability: 0.40               # push THD/TOAD out after TOAD is missed
+  rebaseline_delay_days: [7, 30]
+  rebaseline_shift_days: [45, 90]
+  second_rebaseline_probability: 0.35
+  snapshot_keep_days_after_close: 120        # monthly extracts stop this long after closure
+  recruiter_count: 22
+  hiring_manager_count: 160
+  locations: [Austin, Toronto, London, Dublin, Berlin, Remote]
+
+# ------------------------------------------------------------------ candidate funnel
+funnel:
+  stages: [review, screen, assessment, interview, offer]
+  stage_sla_days: [3, 4, 4, 5, 3]            # from the contract seed; used only for documentation
+  duration_sigma: 0.55                       # lognormal spread of stage durations
+  burst_window_days: 45                      # initial sourcing burst after approval / reopening
+  trickle_rate_share: 0.20                   # ongoing arrivals per 30 days as a share of apps_per_position
+  reopen_burst_share: 0.60                   # smaller burst when a seat reopens after a loss
+  max_applications_per_requisition: 400
+  pipeline_cut_lag_days: [0, 7]              # days after fill before remaining candidates are dispositioned
+  cut_withdrawn_share: 0.20                  # share of cut candidates recorded as withdrawn vs rejected
+  withdrawn_share_of_exits: 0.18             # share of pre-offer exits that are candidate withdrawals
+  offer_withdrawn_share: 0.04                # employer withdraws an extended offer before acceptance
+  candidate_pool_reuse: 0.12                 # share of applications from candidates who applied elsewhere too
+  disposition_reasons:
+    rejected: [not_qualified, experience_mismatch, assessment_failed, interview_feedback, position_filled]
+    withdrawn: [accepted_other_offer, no_response, compensation_expectations, location, personal]
+
+# ------------------------------------------------------------------ offers and post-acceptance
+offers:
+  negotiation_revision_probability: 0.18     # a revised (superseded) version before acceptance
+  admin_revision_probability: 0.14           # accepted offer re-issued after acceptance (salary correction, moved start, letter)
+  admin_revision_reasons: [start_date_revision, salary_correction, letter_reissue]
+  start_date_revision_days: [7, 21]
+  quarantine_case_count: 4                   # applications carrying two distinct accepted offer cycles (ambiguous, for the dbt audit model)
+  base_rescind_probability: 0.012
+  currency: USD
+
+# ------------------------------------------------------------------ HR outcomes
+hr:
+  duplicate_hire_event_share: 0.02
+  duplicate_termination_share: 0.03
+  duplicate_termination_shift_days: [1, 10]
+  late_attrition_annual_rate: 0.14           # terminations after day 60
+  early_tenure_days: [3, 60]
+  termination_reasons:
+    early: [voluntary_resignation, voluntary_resignation, voluntary_resignation, involuntary_performance, involuntary_probation]
+    late: [voluntary_resignation, voluntary_resignation, involuntary_performance, involuntary_restructuring]
+
+# ------------------------------------------------------------------ segments
+business_units:
+  - {code: ENG, name: Engineering,                weight: 0.32, sort_order: 1}
+  - {code: PRD, name: Product & Marketing,        weight: 0.11, sort_order: 2}
+  - {code: SAL, name: Sales,                      weight: 0.22, sort_order: 3}
+  - {code: CSX, name: Customer Success,           weight: 0.14, sort_order: 4}
+  - {code: OPS, name: Operations,                 weight: 0.13, sort_order: 5}
+  - {code: GNA, name: General & Administrative,   weight: 0.08, sort_order: 6}
+
+# Job family mix inside each business unit (weights are normalised).
+business_unit_job_family_mix:
+  ENG: {SWE: 0.62, DAT: 0.22, ITS: 0.16}
+  PRD: {PDM: 0.45, MKT: 0.45, DAT: 0.10}
+  SAL: {SLS: 0.85, MKT: 0.05, OPS: 0.10}
+  CSX: {CSM: 0.80, OPS: 0.15, DAT: 0.05}
+  OPS: {OPS: 0.75, ITS: 0.10, DAT: 0.15}
+  GNA: {FIN: 0.45, PPL: 0.40, ITS: 0.15}
+
+job_levels:
+  - {code: L1, name: Associate,    level_rank: 1, weight: 0.16, duration_multiplier: 0.85, interview_pass_multiplier: 1.05, toad_lead_days: 21, notice_days: 14, attrition_multiplier: 1.35}
+  - {code: L2, name: Professional, level_rank: 2, weight: 0.33, duration_multiplier: 0.95, interview_pass_multiplier: 1.00, toad_lead_days: 30, notice_days: 21, attrition_multiplier: 1.10}
+  - {code: L3, name: Senior,       level_rank: 3, weight: 0.29, duration_multiplier: 1.05, interview_pass_multiplier: 0.95, toad_lead_days: 30, notice_days: 30, attrition_multiplier: 0.90}
+  - {code: L4, name: Lead,         level_rank: 4, weight: 0.12, duration_multiplier: 1.20, interview_pass_multiplier: 0.88, toad_lead_days: 45, notice_days: 30, attrition_multiplier: 0.75}
+  - {code: L5, name: Manager,      level_rank: 5, weight: 0.07, duration_multiplier: 1.35, interview_pass_multiplier: 0.82, toad_lead_days: 60, notice_days: 45, attrition_multiplier: 0.65}
+  - {code: L6, name: Director,     level_rank: 6, weight: 0.03, duration_multiplier: 1.60, interview_pass_multiplier: 0.75, toad_lead_days: 75, notice_days: 60, attrition_multiplier: 0.55}
+
+# Per job family behaviour. stage_pass = probability of advancing out of review, screen,
+# assessment, interview. stage_duration_median_days = review, screen, assessment, interview, offer.
+job_families:
+  - code: SWE
+    name: Software Engineering
+    role_title: Software Engineer
+    sort_order: 1
+    apps_per_position: 10
+    stage_pass: [0.50, 0.66, 0.60, 0.38]
+    offer_accept_rate: 0.78
+    stage_duration_median_days: [4, 5, 7, 13, 4]
+    multi_position_probability: 0.18
+    max_positions: 3
+    renege_rate: 0.045
+    early_attrition_rate: 0.032
+    niche_share: 0.45                        # how often a thin pipeline is blamed on niche skills vs qualified candidates
+    constraint_weights: {qualified_candidates: 0.30, hiring_manager_delay: 0.15, compensation: 0.20, interview_capacity: 0.20, niche_skills: 0.10, candidate_availability: 0.05}
+  - code: DAT
+    name: Data & Analytics
+    role_title: Data Engineer
+    sort_order: 2
+    apps_per_position: 7
+    stage_pass: [0.45, 0.60, 0.55, 0.34]
+    offer_accept_rate: 0.72
+    stage_duration_median_days: [5, 6, 8, 15, 5]
+    multi_position_probability: 0.12
+    max_positions: 3
+    renege_rate: 0.05
+    early_attrition_rate: 0.040
+    niche_share: 0.65
+    constraint_weights: {qualified_candidates: 0.25, hiring_manager_delay: 0.10, compensation: 0.25, interview_capacity: 0.10, niche_skills: 0.25, candidate_availability: 0.05}
+  - code: ITS
+    name: IT & Security
+    role_title: IT Systems Engineer
+    sort_order: 3
+    apps_per_position: 9
+    stage_pass: [0.50, 0.65, 0.60, 0.42]
+    offer_accept_rate: 0.80
+    stage_duration_median_days: [4, 5, 6, 11, 4]
+    multi_position_probability: 0.15
+    max_positions: 3
+    renege_rate: 0.04
+    early_attrition_rate: 0.045
+    niche_share: 0.40
+    constraint_weights: {qualified_candidates: 0.30, hiring_manager_delay: 0.20, compensation: 0.15, interview_capacity: 0.15, niche_skills: 0.15, candidate_availability: 0.05}
+  - code: PDM
+    name: Product Management
+    role_title: Product Manager
+    sort_order: 4
+    apps_per_position: 13
+    stage_pass: [0.45, 0.60, 0.55, 0.36]
+    offer_accept_rate: 0.80
+    stage_duration_median_days: [5, 6, 7, 14, 4]
+    multi_position_probability: 0.08
+    max_positions: 2
+    renege_rate: 0.04
+    early_attrition_rate: 0.040
+    niche_share: 0.30
+    constraint_weights: {qualified_candidates: 0.30, hiring_manager_delay: 0.30, compensation: 0.15, interview_capacity: 0.15, niche_skills: 0.05, candidate_availability: 0.05}
+  - code: MKT
+    name: Marketing
+    role_title: Marketing Specialist
+    sort_order: 5
+    apps_per_position: 18
+    stage_pass: [0.50, 0.66, 0.60, 0.46]
+    offer_accept_rate: 0.86
+    stage_duration_median_days: [4, 5, 5, 9, 3]
+    multi_position_probability: 0.15
+    max_positions: 3
+    renege_rate: 0.045
+    early_attrition_rate: 0.065
+    niche_share: 0.10
+    constraint_weights: {qualified_candidates: 0.25, hiring_manager_delay: 0.35, compensation: 0.15, interview_capacity: 0.15, niche_skills: 0.02, candidate_availability: 0.08}
+  - code: SLS
+    name: Sales
+    role_title: Account Executive
+    sort_order: 6
+    apps_per_position: 16
+    stage_pass: [0.56, 0.70, 0.60, 0.50]
+    offer_accept_rate: 0.82
+    stage_duration_median_days: [3, 4, 5, 7, 3]
+    multi_position_probability: 0.55
+    max_positions: 8
+    renege_rate: 0.07
+    early_attrition_rate: 0.100
+    niche_share: 0.05
+    constraint_weights: {qualified_candidates: 0.25, hiring_manager_delay: 0.20, compensation: 0.30, interview_capacity: 0.10, niche_skills: 0.02, candidate_availability: 0.13}
+  - code: CSM
+    name: Customer Success
+    role_title: Customer Success Manager
+    sort_order: 7
+    apps_per_position: 17
+    stage_pass: [0.56, 0.70, 0.62, 0.50]
+    offer_accept_rate: 0.85
+    stage_duration_median_days: [3, 4, 5, 7, 3]
+    multi_position_probability: 0.45
+    max_positions: 6
+    renege_rate: 0.06
+    early_attrition_rate: 0.085
+    niche_share: 0.05
+    constraint_weights: {qualified_candidates: 0.25, hiring_manager_delay: 0.25, compensation: 0.20, interview_capacity: 0.15, niche_skills: 0.02, candidate_availability: 0.13}
+  - code: OPS
+    name: Operations
+    role_title: Operations Specialist
+    sort_order: 8
+    apps_per_position: 20
+    stage_pass: [0.56, 0.72, 0.62, 0.52]
+    offer_accept_rate: 0.88
+    stage_duration_median_days: [3, 4, 5, 6, 3]
+    multi_position_probability: 0.50
+    max_positions: 8
+    renege_rate: 0.05
+    early_attrition_rate: 0.080
+    niche_share: 0.05
+    constraint_weights: {qualified_candidates: 0.25, hiring_manager_delay: 0.25, compensation: 0.15, interview_capacity: 0.20, niche_skills: 0.02, candidate_availability: 0.13}
+  - code: FIN
+    name: Finance
+    role_title: Financial Analyst
+    sort_order: 9
+    apps_per_position: 12
+    stage_pass: [0.50, 0.65, 0.60, 0.45]
+    offer_accept_rate: 0.82
+    stage_duration_median_days: [4, 5, 6, 10, 4]
+    multi_position_probability: 0.10
+    max_positions: 2
+    renege_rate: 0.04
+    early_attrition_rate: 0.050
+    niche_share: 0.20
+    constraint_weights: {qualified_candidates: 0.30, hiring_manager_delay: 0.30, compensation: 0.15, interview_capacity: 0.15, niche_skills: 0.05, candidate_availability: 0.05}
+  - code: PPL
+    name: People & Talent
+    role_title: People Partner
+    sort_order: 10
+    apps_per_position: 14
+    stage_pass: [0.50, 0.65, 0.60, 0.45]
+    offer_accept_rate: 0.85
+    stage_duration_median_days: [4, 5, 6, 9, 3]
+    multi_position_probability: 0.10
+    max_positions: 2
+    renege_rate: 0.04
+    early_attrition_rate: 0.055
+    niche_share: 0.10
+    constraint_weights: {qualified_candidates: 0.30, hiring_manager_delay: 0.30, compensation: 0.15, interview_capacity: 0.15, niche_skills: 0.02, candidate_availability: 0.08}
+
+# Governed vocabulary mirrored from ta-exec-db seed rows (dim_hiring_constraint). The
+# generator only emits codes from this list; dbt owns the labels and keys.
+hiring_constraints:
+  - qualified_candidates
+  - hiring_manager_delay
+  - compensation
+  - interview_capacity
+  - niche_skills
+  - candidate_availability
+  - no_material_constraint

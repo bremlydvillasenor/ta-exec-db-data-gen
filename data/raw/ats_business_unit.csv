@@ -1,0 +1,7 @@
+business_unit_code,business_unit_name,sort_order,is_active
+ENG,Engineering,1,true
+PRD,Product & Marketing,2,true
+SAL,Sales,3,true
+CSX,Customer Success,4,true
+OPS,Operations,5,true
+GNA,General & Administrative,6,true
