@@ -1,0 +1,7 @@
+job_level_code,job_level_name,level_rank,is_active
+L1,Associate,1,true
+L2,Professional,2,true
+L3,Senior,3,true
+L4,Lead,4,true
+L5,Manager,5,true
+L6,Director,6,true

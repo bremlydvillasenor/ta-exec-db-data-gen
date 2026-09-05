@@ -1,0 +1,128 @@
+{
+  "seed": 20260531,
+  "config_fingerprint": "96c2c5b69799f188",
+  "as_of_date": "2026-05-31",
+  "history_start_date": "2024-01-01",
+  "future_thd_end_date": "2027-05-31",
+  "tables": {
+    "ats_business_unit": {
+      "rows": 6,
+      "columns": [
+        "business_unit_code",
+        "business_unit_name",
+        "sort_order",
+        "is_active"
+      ],
+      "file": "ats_business_unit.csv"
+    },
+    "ats_job_family": {
+      "rows": 10,
+      "columns": [
+        "job_family_code",
+        "job_family_name",
+        "sort_order",
+        "is_active"
+      ],
+      "file": "ats_job_family.csv"
+    },
+    "ats_job_level": {
+      "rows": 6,
+      "columns": [
+        "job_level_code",
+        "job_level_name",
+        "level_rank",
+        "is_active"
+      ],
+      "file": "ats_job_level.csv"
+    },
+    "ats_requisition_snapshot": {
+      "rows": 20196,
+      "columns": [
+        "snapshot_date",
+        "requisition_id",
+        "requisition_title",
+        "business_unit_code",
+        "job_family_code",
+        "job_level_code",
+        "work_location",
+        "hiring_manager_id",
+        "recruiter_id",
+        "requisition_status",
+        "approval_date",
+        "target_hire_date",
+        "target_offer_acceptance_date",
+        "requested_positions",
+        "openings_position",
+        "cancelled_positions",
+        "primary_hiring_constraint"
+      ],
+      "file": "ats_requisition_snapshot.csv"
+    },
+    "ats_application": {
+      "rows": 74096,
+      "columns": [
+        "application_id",
+        "candidate_id",
+        "requisition_id",
+        "application_date",
+        "source_channel",
+        "application_status",
+        "status_date",
+        "current_stage_code",
+        "disposition_reason"
+      ],
+      "file": "ats_application.csv"
+    },
+    "ats_stage_history": {
+      "rows": 155902,
+      "columns": [
+        "stage_history_id",
+        "application_id",
+        "stage_code",
+        "stage_sequence",
+        "stage_entered_date",
+        "stage_exited_date"
+      ],
+      "file": "ats_stage_history.csv"
+    },
+    "ats_offer_version": {
+      "rows": 6676,
+      "columns": [
+        "offer_version_id",
+        "offer_id",
+        "application_id",
+        "requisition_id",
+        "offer_cycle_number",
+        "offer_version_number",
+        "version_reason",
+        "offer_status",
+        "is_current_version",
+        "offer_extended_date",
+        "offer_accepted_date",
+        "offer_declined_date",
+        "offer_withdrawn_date",
+        "offer_rescinded_date",
+        "candidate_renege_date",
+        "proposed_start_date",
+        "base_salary",
+        "currency"
+      ],
+      "file": "ats_offer_version.csv"
+    },
+    "hr_worker_event": {
+      "rows": 4041,
+      "columns": [
+        "worker_event_id",
+        "worker_id",
+        "candidate_id",
+        "application_id",
+        "requisition_id",
+        "event_type",
+        "event_date",
+        "event_reason",
+        "record_created_date"
+      ],
+      "file": "hr_worker_event.csv"
+    }
+  }
+}
