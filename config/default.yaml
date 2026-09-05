@@ -21,7 +21,10 @@ demand:
   # a minority are approved much earlier as part of the annual plan.
   approval_lead_days: {min: 25, mode: 60, max: 200}
   early_plan_share: 0.15
-  early_plan_lead_days: {min: 150, mode: 240, max: 365}
+  # Annual-plan requisitions are approved up to ~15 months ahead, which is what keeps
+  # planned demand visible all the way to future_thd_end (2027-05-31) rather than fading
+  # out early: a THD in May 2027 needs an approval date on or before the as-of date.
+  early_plan_lead_days: {min: 150, mode: 260, max: 450}
   # Minimum gap between approval and THD after clamping to history_start.
   min_thd_gap_days: 21
 
@@ -70,7 +73,10 @@ funnel:
   cut_withdrawn_share: 0.20                  # share of cut candidates recorded as withdrawn vs rejected
   withdrawn_share_of_exits: 0.18             # share of pre-offer exits that are candidate withdrawals
   offer_withdrawn_share: 0.04                # employer withdraws an extended offer before acceptance
-  candidate_pool_reuse: 0.12                 # share of applications from candidates who applied elsewhere too
+  candidate_pool_reuse: 0.12                 # draw rate for reusing an earlier candidate; the realised
+                                             # share is lower because the donor must be an earlier
+                                             # application and must not create an impossible person
+                                             # (two live acceptances, or applying while already hired)
   disposition_reasons:
     rejected: [not_qualified, experience_mismatch, assessment_failed, interview_feedback, position_filled]
     withdrawn: [accepted_other_offer, no_response, compensation_expectations, location, personal]
@@ -95,6 +101,15 @@ hr:
   termination_reasons:
     early: [voluntary_resignation, voluntary_resignation, voluntary_resignation, involuntary_performance, involuntary_probation]
     late: [voluntary_resignation, voluntary_resignation, involuntary_performance, involuntary_restructuring]
+
+# ------------------------------------------------------------------ story summary
+# Mirrors of governed reference values from ta-exec-db (ref_reporting_config). They are
+# used only by the indicative story summary and its tests, never by the raw outputs.
+story:
+  forecast_min_segment_observations: 30   # smallest segment a stage yield may be trained on
+  fill_rate_target: 0.90
+  risk_high_max_days: 7                   # ref_risk_band: Missed <0, High 0-7, Medium 8-14, On Track >=15
+  risk_medium_max_days: 14
 
 # ------------------------------------------------------------------ segments
 business_units:

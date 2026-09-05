@@ -46,6 +46,34 @@ def _day_to_date(idx: DayIndex, *columns: str) -> list[pl.Expr]:
     ]
 
 
+def _split_conflicting_reuse(candidate: np.ndarray, holds_seat: np.ndarray, in_pipeline: np.ndarray) -> np.ndarray:
+    """Undo any candidate merge that would make one person hold two jobs at once.
+
+    Reusing a candidate across requisitions is realistic, but a real person cannot hold two
+    live acceptances at the same time, and cannot still be an active candidate somewhere
+    while already holding one. Applications are visited in application order; the one that
+    would create the conflict is handed back its own candidate, so the reuse rate drops
+    slightly instead of the source data describing an impossible person.
+    """
+    resolved = candidate.copy()
+    seat: dict[int, bool] = {}
+    pipeline: dict[int, bool] = {}
+    for i in range(resolved.size):
+        key = int(resolved[i])
+        if key != i:
+            conflict = (holds_seat[i] and (seat.get(key, False) or pipeline.get(key, False))) or (
+                in_pipeline[i] and seat.get(key, False)
+            )
+            if conflict:
+                resolved[i] = i
+                key = i
+        if holds_seat[i]:
+            seat[key] = True
+        if in_pipeline[i]:
+            pipeline[key] = True
+    return resolved
+
+
 def assign_candidates(apps: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory) -> pl.DataFrame:
     """Give every application a candidate; some candidates apply to several requisitions."""
     rng = rngs.stream("candidates")
@@ -63,6 +91,18 @@ def assign_candidates(apps: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory
         .with_columns(candidate_raw=pl.when(pl.col("dup")).then(pl.col("app_idx")).otherwise(pl.col("candidate_raw")))
         .drop("dup")
     )
+    # a live acceptance takes the seat; an active application keeps the person in a pipeline
+    holds_seat = (apps["offer_accepted_day"].to_numpy() != NO_DAY) & (
+        (apps["offer_rescinded_day"].to_numpy() == NO_DAY) & (apps["candidate_renege_day"].to_numpy() == NO_DAY)
+    )
+    in_pipeline = (apps["status"] == "active").to_numpy()
+    row_of_app = np.argsort(apps["app_idx"].to_numpy(), kind="stable")
+    fixed = _split_conflicting_reuse(
+        apps["candidate_raw"].to_numpy()[row_of_app], holds_seat[row_of_app], in_pipeline[row_of_app]
+    )
+    resolved = np.empty_like(fixed)
+    resolved[row_of_app] = fixed
+    apps = apps.with_columns(candidate_raw=pl.Series(resolved))
     # renumber candidates by first application so ids look natural
     first_seen = (
         apps.group_by("candidate_raw")

@@ -52,7 +52,8 @@ requisitions are processed in a fixed order.
    bands under a "Jan-May 2026" THD selection, which is not reproducible under this
    invariant; the risk visuals need a THD range that extends past the as-of date (or no THD
    filter) to show the mix. This is the one place where the wireframe and the metric
-   definitions pull in different directions; the generator follows the definitions.
+   definitions pull in different directions; the generator follows the definitions. See
+   open question 1 below for the options this leaves the contract.
 2. **The ATS has no `started` or `hired` status.** `application_status` stops at
    `offer_accepted`; the actual start is an HR event. dbt derives `started` by joining
    `hr_worker_event`, exactly as the contract's event-over-status rule intends.
@@ -78,28 +79,83 @@ requisitions are processed in a fixed order.
    contract's uniqueness rule on (application, stage, entry date) trivially true.
 9. **Reference tables have no `Unknown` member.** The dimension contracts ask dbt to add key
    -1; a source extract would not carry it.
-10. **Candidates are a degenerate key.** No candidate table is produced (the contract keeps
-    candidates out of scope); candidate ids are reused across requisitions to make the
-    (candidate, requisition) uniqueness rule meaningful.
+10. **Candidates are a degenerate key, but still one person.** No candidate table is
+    produced (the contract keeps candidates out of scope); candidate ids are reused across
+    requisitions to make the (candidate, requisition) uniqueness rule meaningful. Reuse is
+    constrained so the source never describes an impossible person: no candidate holds two
+    live acceptances, none is hired twice, and none is still an active candidate elsewhere
+    after taking a seat. A merge that would break one of those is undone and the
+    application keeps its own candidate, which is why the realised reuse rate is a little
+    below `funnel.candidate_pool_reuse`. Nothing in the fact grain requires this - it keeps
+    hire counts and attrition analysis at source level believable.
 11. **HR duplicates are deliberate.** About 2% of hire events are exact re-sends and about
     3% of terminations have a later-dated second row, so dbt's "one row per started hire,
     earliest termination after start" rule has something to do.
 12. The `hiring_constraints` list and stage codes in the configuration mirror the contract
     seed rows; the tests assert the vocabulary. Labels, keys, SLA days and risk bands stay
     in the dbt seeds.
+13. **Planned demand reaches the contract's THD ceiling, thinly.** A requisition only exists
+    if it was approved on or before the as-of date, so a Target Hire Date of 31 May 2027
+    requires an approval lead of a full year. `demand.early_plan_lead_days` allows up to 450
+    days for the annual-plan share, which is why demand runs to the ceiling instead of
+    fading out in early 2027; volumes taper from about 150 positions in June 2026 to a
+    handful a month in 2027, which is what a real plan looks like that far out.
 
 ## Validation split
 
-`ta-gen validate` (79 checks) proves the source is internally consistent: keys, foreign
+`ta-gen validate` (82 checks) proves the source is internally consistent: keys, foreign
 keys, vocabularies, no actual date after the as-of date, target dates inside the horizon,
 TOAD between approval and THD, seat quantities and status consistency on every snapshot,
 the identity `requested = active fills + openings` on the latest snapshot derived from the
 offer events, one open stage exactly for active applications, stage chaining, offer status
-versus dates, and HR starts only for accepted offers that were not lost. The contract's
-analytics rules (section 12 of `spec.md`) are dbt tests and are not duplicated here.
+versus dates, HR starts only for accepted offers that were not lost, and the three
+candidate-realism rules in assumption 10. The contract's analytics rules (section 12 of
+`spec.md`) are dbt tests and are not duplicated here.
 
 `uv run pytest` runs the generator on scaled-down configurations and checks determinism,
 validation, contract alignment (columns, vocabularies, boundaries, no derived columns) and
-the story itself (segment differences, populated risk bands, constraint-risk link,
-interview bottleneck, offer losses, reopened requisitions, surge cohorts leaving earlier
-without a perfect relationship).
+the story itself. The story tests cover segment differences, populated risk bands, the
+constraint-risk link, the interview bottleneck, offer losses, reopened requisitions and
+surge cohorts leaving earlier without a perfect relationship; `test_forecast.py` adds the
+parts a configuration change could weaken silently: quarantine containment, the Time to
+Fill population, the stage-yield fallback order and floor, per-segment yield variation, the
+requisition-level cap actually binding, forecast lift and reconciliation between month and
+summary grain, the risk-band behaviour under each THD selection, and planned demand
+reaching the future THD ceiling.
+
+
+## Open questions for the contract (`ta-exec-db`)
+
+These came out of building the data. None of them is a defect in the generated records, and
+none is fixed here: they are decisions for the contract repository, listed so they are not
+lost.
+
+1. **The risk visual's default THD selection cannot show a band mix.** EXEC-07 uses the
+   as-of date for the band and THD for period selection, and TOAD is on or before THD by
+   definition. A THD window that ends on the as-of date therefore contains only Missed
+   positions - 102 of 102 in the current data - while the wireframe draws 22 / 19 / 20 /
+   112 under exactly that window. Retuning volumes does not help; the ratio stays 100%
+   Missed. Three ways out, in order of preference:
+   a. default the THD slicer to a window that reaches past the as-of date (for example the
+      next 12 THD months), which is also the more natural executive question - "what is at
+      risk in the demand still ahead of us";
+   b. exempt the risk visuals from `thd_period`, the way the quality visuals already are,
+      and say so in the filter-behaviour note;
+   c. keep the current default and relabel the visual as an overdue-demand breakdown, since
+      that is all it can show.
+   `risk_band_by_thd_window` in `ta-gen summary` prints the mix under each option.
+2. **Time to Fill has two different populations in the contract.** `spec.md` (EXEC-05) says
+   "every accepted-offer event, on or before the as-of date"; `metric-def.yaml` says "every
+   accepted-offer event ... on non-cancelled requisitions with THD in the selected period".
+   The two differ by 33 acceptances in the current data (median 40 days either way, but the
+   count is what reconciles with SUPP-06). This summary follows `metric-def.yaml` because it
+   is the machine-readable definition the marts are built from. One of the two documents
+   needs to change.
+3. **The wireframe's figures are illustrative.** They predate this generator and are not
+   produced by any seed of this configuration; section 10 of `data_story.md` reconciles
+   them. Replace them with generated numbers before the wireframe is used as an acceptance
+   reference, otherwise every build will look like it is failing.
+4. **The `ta-exec-db` README still describes one implementation repository** owning both the
+   Python generation and the dbt transformations. The working split is three repositories:
+   `ta-exec-db` (specification and contracts), this one (Python raw-data generation) and a
+   separate dbt project. `dbt-ownership.md` already reads correctly; the README does not.
