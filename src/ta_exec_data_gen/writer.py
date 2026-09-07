@@ -28,11 +28,10 @@ def config_fingerprint(cfg: GeneratorConfig) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def generator_commit() -> str | None:
-    """The generator commit that produced this batch, when it is running from a checkout."""
+def _git(*args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
+            ["git", "-C", str(Path(__file__).resolve().parents[2]), *args],
             capture_output=True,
             text=True,
             timeout=10,
@@ -40,7 +39,23 @@ def generator_commit() -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return result.stdout.strip() or None
+    return result.stdout if result.returncode == 0 else None
+
+
+def generator_commit() -> str | None:
+    """The generator commit that produced this batch, when it is running from a checkout."""
+    out = _git("rev-parse", "HEAD")
+    return out.strip() if out else None
+
+
+def working_tree_clean() -> bool | None:
+    """Whether the generator ran from a committed state.
+
+    A dirty tree means `generator.commit` does not fully describe the code that produced
+    the batch, so the manifest says so rather than implying a reproducible build.
+    """
+    out = _git("status", "--porcelain")
+    return out.strip() == "" if out is not None else None
 
 
 def _checksum(path: Path) -> str:
@@ -82,6 +97,7 @@ def write_manifest(
         "generator": {
             "package": "ta-exec-data-gen",
             "commit": generator_commit(),
+            "working_tree_clean": working_tree_clean(),
         },
         "seed": cfg.seed,
         "config_fingerprint": config_fingerprint(cfg),
