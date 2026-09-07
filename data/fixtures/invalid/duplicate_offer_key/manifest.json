@@ -6,8 +6,8 @@
   },
   "generator": {
     "package": "ta-exec-data-gen",
-    "commit": "5362f6e5c0d0b18fe4c7394ae4666f1591fa426b",
-    "working_tree_clean": false
+    "commit": "5e4e03e6ce9089cd566864af31ac9656361f71e3",
+    "working_tree_clean": true
   },
   "seed": 20260531,
   "config_fingerprint": "c5375b451520d698",
