@@ -11,5 +11,5 @@ def test_same_seed_same_output(cfg_small, tables_small):
 
 
 def test_different_seed_changes_output(cfg_small, tables_small):
-    other = generate(scaled_config(8, seed=cfg_small.seed + 1, offers={"quarantine_case_count": 2}))
+    other = generate(scaled_config(8, seed=cfg_small.seed + 1))
     assert not tables_small["ats_application"].equals(other["ats_application"])

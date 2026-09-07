@@ -7,10 +7,10 @@ which re-derives them from the raw files with simple rules to show what dbt and 
 will find. Figures are for the default seed (20260531).
 
 Where the contract states a population rule, the summary follows it, so these numbers can
-be compared with the governed marts instead of quietly differing from them: quarantined
-applications are held out of every figure, including the funnel stage counts and the
-forecast yield, Time to Fill runs on non-cancelled requisitions, and the forecast uses the
-FCST-01..04 definitions including the segment fallback and the requisition-level cap.
+be compared with the governed marts instead of quietly differing from them: one application
+contributes at most one accepted-offer event, Time to Fill runs on non-cancelled
+requisitions, and the forecast uses the FCST-01..04 definitions including the segment
+fallback and the requisition-level cap. Figures are for `ta-exec-db` contract release 1.3.
 
 ## 1. Demand keeps growing and gets rushed in mid-2025
 
@@ -57,19 +57,20 @@ whole), so the headline KPI is below the 90% target.
 | Software Engineering, IT & Security, Product Management | 68-83 |
 | Data & Analytics | 86 |
 
-The population narrows from the source in two contract-driven steps, both shown by
+The population narrows from the source in one contract-driven step, shown by
 `time_to_fill_population` in the summary:
 
 | Step | Applications |
 |---|---:|
 | Applications with an acceptance in the source | 3,718 |
-| less quarantined (more than one acceptance cycle) | -4 |
 | less acceptances on cancelled requisitions | -33 |
-| **Governed EXEC-05 population** | **3,681** |
+| **Governed EXEC-05 population** | **3,685** |
 
 Median Time to Fill is 40 days on both ends of that table, but the counts differ, and it
 is the count that reconciles with SUPP-06. Offers later rescinded or reneged stay in the
-population: Time to Fill measures the recruiting cycle TA actually completed.
+population: Time to Fill measures the recruiting cycle TA actually completed. Since
+contract 1.3 there is only one narrowing step: with one current offer row per application
+there is no ambiguous multi-acceptance case to hold back.
 
 ## 4. TOAD risk concentrates where the constraints are
 
@@ -113,6 +114,9 @@ open question it raises for the contract.
 | Interview | 192 | 37% | 8 | 5 |
 | Offer | 18 | 74% | 3 | 3 |
 
+The 18 candidates active at the Offer stage are the applications whose offer row still says
+`pending`: issued, no response yet on the as-of date.
+
 Interview conversion is lowest and slowest in Software Engineering (32%, 12 days), Data &
 Analytics (31%, 14 days) and Product Management (30%, 13 days), which is what explains the
 weaker delivery in those segments. Sales and Operations interviews convert at about 38-42%
@@ -121,10 +125,11 @@ renege (166) or an employer rescind (72) remain successful conversions and remai
 to Fill, but their seats are back in open demand. 88 requisitions visibly return from
 `filled` to `open` in the snapshot history because of this.
 
-Stage counts here exclude the four quarantined applications, which removes 4 completed
-events from every stage. The offer stage is the one place where this changes a ratio rather
-than only a count: its numerator is the governed acceptance count, so its denominator has to
-be the governed offer population as well.
+Stage exits carry a reason only where the application actually left the process, and only
+pre-acceptance terms appear: 55,791 `rejected`, 12,284 `withdrawn`, 767 `offer_declined`
+and 539 `offer_withdrawn`. The Offer stage of an accepted application is a **successful**
+exit with a null reason, and a later rescind or renege never rewrites it - which is exactly
+why offer conversion (74%) is unaffected by the 238 offers lost after acceptance.
 
 ## 6. Forecast: the active pipeline closes about a quarter of the shortfall
 
@@ -133,8 +138,8 @@ who are active on the as-of date, and caps each requisition at its remaining ope
 
 | THD selection | Requested | Filled | Expected pipeline fills | Fill Rate | Forecast Fill Rate |
 |---|---:|---:|---:|---:|---:|
-| All THD | 3,988 | 3,480 | 119.3 | 87.3% | 90.3% |
-| Jan-May 2026 | 725 | 623 | 11.0 | 85.9% | 87.5% |
+| All THD | 3,988 | 3,480 | 119.2 | 87.3% | 90.3% |
+| Jan-May 2026 | 725 | 623 | 11.0 | 85.9% | 87.4% |
 | THD on or before as-of | 3,310 | 3,143 | 18.8 | 95.0% | 95.5% |
 | THD after as-of | 678 | 337 | 100.4 | 49.7% | 64.5% |
 
@@ -164,22 +169,45 @@ hires left within 60 days - **9.2%**, above the 8% target. The July 2025 cohort,
 hired during the surge, runs at 15% and September 2025 at 13%, while January 2026 is at 4%.
 The relationship with speed is visible but not forced: the fastest cohorts are the surge
 cohorts, yet some slow cohorts also show high attrition (February 2025: 11% at a 39-day
-median). By business unit, Sales runs at about 12% and Engineering under 5%.
+median). By business unit, Sales runs at about 12% and Engineering under 5%. Only actual
+starts count: the 190 accepted offers still waiting for a start date are outside both the
+numerator and the denominator.
 
-## 9. Source quirks dbt must handle
+## 9. Offers, timestamps and source quirks dbt must handle
 
-* 733 applications carry more than one accepted offer version of the same offer
-  (administrative revisions); the earliest acceptance is the governed one.
-* 4 applications carry two accepted offer cycles (ambiguous, to be quarantined). Both cycles
-  end in a renege, so no seat depends on the resolution, but they must still be recorded in
-  the audit model and kept out of the application fact.
-* 852 negotiation revisions (`superseded` versions) before acceptance.
-* Duplicate HR rows: re-sent hire events and later-dated second termination rows.
+The offer extract is current-state: 5,042 rows, one per application that received an offer.
+
+| Current offer status | Rows | With a preserved acceptance date |
+|---|---:|---:|
+| `accepted` | 3,480 | 3,480 |
+| `offer_declined` | 767 | 0 |
+| `offer_withdrawn` | 539 | 0 |
+| `candidate_renege` | 166 | 166 |
+| `offer_rescinded` | 72 | 72 |
+| `pending` | 18 | 0 |
+
+All 238 offers lost after acceptance are still in the extract with their original
+acceptance date, so a missing row can never be read as a loss. Of the 3,480 accepted
+offers, 190 are waiting for a start date and 3,290 have started.
+
+* 921 accepted offers were edited after acceptance (moved start date, corrected salary,
+  re-issued letter). Each edit changes the same row and advances its `updated_at`; none of
+  them creates a second offer or a second acceptance.
+* 13,519 requisition snapshot rows repeat an earlier extract's `updated_at` unchanged,
+  which is what the contract's "do not restamp an unchanged row" rule looks like in data.
+  Every one of the 3,024 requisitions also appears in the 31 May 2026 extract.
+* 266 offers have a planned start date after the as-of date - planning data, not a future
+  actual event.
+* Duplicate HR rows: 63 re-sent start events and 18 workers with a later-dated second
+  termination row.
 * 496 requisitions have their THD and TOAD pushed out in later snapshots; the latest
-  snapshot on or before the as-of date is the reporting state.
+  snapshot on or before the as-of date is the reporting state. 88 requisitions visibly
+  return from `filled` to `open` after a post-acceptance loss.
 * 3,895 candidates applied to more than one requisition. No candidate holds two live
-  acceptances, is hired twice, keeps an application active elsewhere after taking a seat,
+  acceptances, is started twice, keeps an application active elsewhere after taking a seat,
   or applies again once they have accepted one.
+* Deliberately broken extracts live in `data/fixtures/invalid/`, one per documented
+  violation. They are never part of `data/raw` and must not be loaded.
 
 ## 10. Reconciling with the wireframe
 

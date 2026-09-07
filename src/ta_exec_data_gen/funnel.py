@@ -66,7 +66,7 @@ class App:
     offer_withdrawn: int = NO_DAY
     offer_rescinded: int = NO_DAY
     candidate_renege: int = NO_DAY
-    proposed_start: int = NO_DAY
+    planned_start: int = NO_DAY
     start_revised: bool = False
     start_day: int = NO_DAY  # actual employee start (<= as_of) when it happened
     # simulation-only scratch
@@ -264,7 +264,7 @@ class FunnelSimulator:
                 "offer_withdrawn",
                 "offer_rescinded",
                 "candidate_renege",
-                "proposed_start",
+                "planned_start",
                 "start_day",
                 "loss_day",
                 "natural_accept",
@@ -285,7 +285,7 @@ class FunnelSimulator:
             snap_to_mondays(np.array([t + jl.notice_days + int(self.rng.integers(-3, 11))]), self.idx.origin)[0]
         )
         proposed = max(proposed, t + 3)
-        app.proposed_start = proposed
+        app.planned_start = proposed
         start = proposed
         if self.rng.random() < self.cfg.offers.admin_revision_probability * 0.5:
             shift = int(self.rng.integers(oc.start_date_revision_days[0], oc.start_date_revision_days[1] + 1))
@@ -315,6 +315,10 @@ class FunnelSimulator:
                 return
         if start <= self.as_of:
             app.start_day = start
+            # the ATS moves the application on when the person actually starts; the start
+            # itself stays an HR event (contract: event and state are separate columns)
+            app.status = "started"
+            app.status_day = start
 
     # ------------------------------------------------------------------ per requisition
     def _simulate_requisition(self, row: dict) -> ReqOutcome:
@@ -527,13 +531,14 @@ def outcomes_to_frames(outcomes: list[ReqOutcome]) -> tuple[pl.DataFrame, pl.Dat
                     "exit_reason": a.exit_reason,
                     "disposition_reason": a.disposition_reason,
                     "status_day": a.status_day,
+                    "exit_stage": a.last_stage,
                     "offer_extended_day": a.offer_extended,
                     "offer_accepted_day": a.offer_accepted,
                     "offer_declined_day": a.offer_declined,
                     "offer_withdrawn_day": a.offer_withdrawn,
                     "offer_rescinded_day": a.offer_rescinded,
                     "candidate_renege_day": a.candidate_renege,
-                    "proposed_start_day": a.proposed_start,
+                    "planned_start_day": a.planned_start,
                     "start_revised": a.start_revised,
                     "start_day": a.start_day,
                     "entries": a.entries,
@@ -556,7 +561,7 @@ def outcomes_to_frames(outcomes: list[ReqOutcome]) -> tuple[pl.DataFrame, pl.Dat
         .with_columns(pl.col("app_idx").cast(pl.Int64))
     )
     stage = (
-        apps.select("app_idx", "entries", "exits")
+        apps.select("app_idx", "entries", "exits", "exit_stage", "exit_reason")
         .with_columns(stage_index=pl.int_ranges(0, 5))
         .explode(["stage_index", "entries", "exits"], empty_as_null=True)
         .filter(pl.col("entries") != NO_DAY)
@@ -564,8 +569,15 @@ def outcomes_to_frames(outcomes: list[ReqOutcome]) -> tuple[pl.DataFrame, pl.Dat
         .with_columns(
             stage_code=pl.col("stage_index").replace_strict(dict(enumerate(STAGES)), return_dtype=pl.Utf8),
             stage_sequence=pl.col("stage_index") + 1,
+            # only the stage the application left the process from carries a reason;
+            # advancing to the next stage, and an offer stage closed by an acceptance,
+            # are successful exits and stay null
+            exit_reason=pl.when(pl.col("stage_index") == pl.col("exit_stage"))
+            .then(pl.col("exit_reason"))
+            .otherwise(pl.lit(None, dtype=pl.Utf8)),
         )
+        .drop("exit_stage")
         .sort(["app_idx", "stage_sequence"])
     )
-    apps = apps.drop(["entries", "exits"])
+    apps = apps.drop(["entries", "exits", "exit_stage"])
     return req_state, apps, stage

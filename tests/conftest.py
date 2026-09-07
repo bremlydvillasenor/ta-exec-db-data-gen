@@ -21,7 +21,7 @@ def scaled_config(base_positions: float, **extra) -> GeneratorConfig:
 
 @pytest.fixture(scope="session")
 def cfg_small() -> GeneratorConfig:
-    return scaled_config(8, offers={"quarantine_case_count": 2})
+    return scaled_config(8)
 
 
 @pytest.fixture(scope="session")
