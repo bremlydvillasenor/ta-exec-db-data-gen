@@ -53,7 +53,14 @@ def _stale_updated_at(tables: Tables, cfg: GeneratorConfig) -> Tables:
 def _overlapping_repeat_attempt(tables: Tables, cfg: GeneratorConfig) -> Tables:
     """A second attempt at the same requisition submitted before the first one ended."""
     app = tables["ats_application"]
-    pairs = app.group_by("candidate_id", "requisition_id").len().filter(pl.col("len") > 1)
+    # group_by does not promise an order, so sort before picking: a fixture that changes
+    # between runs would break the determinism guarantee it is meant to be checked against
+    pairs = (
+        app.group_by("candidate_id", "requisition_id")
+        .len()
+        .filter(pl.col("len") > 1)
+        .sort(["candidate_id", "requisition_id"])
+    )
     if pairs.height == 0:  # pragma: no cover - the default configuration always has repeats
         raise ValueError("no repeated candidate/requisition attempt to make overlap")
     key = pairs.head(1).row(0, named=True)
