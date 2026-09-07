@@ -36,6 +36,15 @@ APPLICATION_STATUSES = [
 ACCEPTED_STATUSES = ["offer_accepted", "started", "offer_rescinded", "candidate_renege"]
 OFFER_STAGE_STATUSES = ACCEPTED_STATUSES + ["offer_declined", "offer_withdrawn"]
 STAGE_EXIT_REASONS = ["rejected", "withdrawn", "offer_declined", "offer_withdrawn"]
+# The dates on which an attempt released the candidate. Acceptance is deliberately absent:
+# it commits the person rather than freeing them, and only a later loss ends that commitment.
+OFFER_RELEASE_DATE_COLUMNS = (
+    "offer_declined_date",
+    "offer_withdrawn_date",
+    "offer_rescinded_date",
+    "candidate_renege_date",
+)
+RELEASE_DATE_COLUMNS = ("rejected_date", "withdrawal_date", *OFFER_RELEASE_DATE_COLUMNS)
 REQUISITION_STATUSES = ["open", "filled", "cancelled"]
 LOOKUP_CODES = {
     "ats_business_unit": "business_unit_code",
@@ -237,6 +246,17 @@ class Validator:
 
     # ------------------------------------------------------------------ checks
     def run(self) -> list[CheckResult]:
+        # declared shape: tables, columns, data types, and required values ------------
+        # This runs first and is a precondition, not one check among many, so nothing above it
+        # may touch the data. Everything that follows - the table lookups on the next lines
+        # included - assumes the declared tables and columns exist with the declared type: a
+        # missing table raises KeyError, a missing column raises on the first expression that
+        # names it, and a comparison against a missing value quietly yields null. So if the
+        # shape is wrong, report that and stop rather than crash or produce noise.
+        self._check_schema()
+        if any(not r.passed for r in self.results):
+            return self.results
+
         t = self.t
         snap, app, stg, off, hr = (
             t["ats_requisition_snapshot"],
@@ -247,15 +267,6 @@ class Validator:
         )
         latest = self._latest_snapshot()
         as_of = pl.lit(self.as_of)
-
-        # declared shape: columns, data types, and required values ------------------
-        # This runs first and is a precondition, not one check among many. Every rule below
-        # assumes the declared columns exist with the declared type; comparing a date against
-        # a string raises, and comparing anything against a missing value quietly yields null.
-        # So if the shape is wrong, report that and stop rather than produce noise or crash.
-        self._check_schema()
-        if any(not r.passed for r in self.results):
-            return self.results
 
         # keys ----------------------------------------------------------------
         self._unique("snapshot: unique (requisition_id, snapshot_date)", snap, ["requisition_id", "snapshot_date"])
@@ -370,19 +381,25 @@ class Validator:
         self._check_hr(app, hr)
 
         # repeat attempts and candidate realism -------------------------------------------------
-        self._check_repeat_attempts(app, stg)
+        self._check_repeat_attempts(app, stg, off)
         self._check_candidate_realism(app, hr)
         return self.results
 
     # ------------------------------------------------------------------ declared shape
     def _check_schema(self) -> None:
-        """Every file has the declared columns, of the declared type, with no missing values.
+        """Every declared file is present, with the declared columns, types and required values.
 
         Comparison-based rules cannot do this job: in SQL and in Polars a comparison against
         null evaluates to null, so a required identifier, status or quantity that arrives
-        empty slips silently through every range and consistency check downstream. This is
-        the check that stops that, and it runs before any of them.
+        empty slips silently through every range and consistency check downstream. Nor can
+        they survive a missing file or column - they raise. This is the check that turns both
+        into findings, and it runs before any of them touches the data.
         """
+        undeclared = [name for name in self.t if name not in SCHEMA]
+        self._fail(
+            "extract: no undeclared tables",
+            pl.DataFrame({"unexpected_table": undeclared}) if undeclared else pl.DataFrame(),
+        )
         for name, columns in SCHEMA.items():
             frame = self.t.get(name)
             if frame is None:
@@ -860,17 +877,24 @@ class Validator:
         )
 
     # ------------------------------------------------------------------ repeat attempts
-    def _check_repeat_attempts(self, app: pl.DataFrame, stg: pl.DataFrame) -> None:
+    def _check_repeat_attempts(self, app: pl.DataFrame, stg: pl.DataFrame, off: pl.DataFrame) -> None:
         """A candidate/requisition pair may repeat, as consecutive attempts with new IDs.
 
         Contract 1.3 allows a genuine second attempt at the same requisition after the first
         was lost, so pair uniqueness is the wrong rule. What must hold instead is that the
-        attempts do not overlap: the earlier one has to have finished - it left the process,
-        and its last stage closed - before the later one was submitted. Two live attempts by
-        one person on one requisition would be an impossible person, and the active-fill
-        rules below are the other half of the same guarantee.
+        attempts do not overlap: the earlier one has to have released the candidate before the
+        later one was submitted. Two live attempts by one person on one requisition would be an
+        impossible person, and the active-fill rules below are the other half of the guarantee.
+
+        The end of an attempt is the date the candidate was released, taken from the recorded
+        loss, never from the last stage exit on its own. The Offer stage closes at acceptance,
+        so a stage-based end would call an accepted attempt finished while the commitment is
+        still live - and a rescind or renege weeks later is what actually ends it. An attempt
+        with no recorded loss (still active, or holding an acceptance) never released anyone,
+        so it has no end and any later attempt on the same requisition fails this check.
         """
-        attempt_end = stg.group_by("application_id").agg(attempt_end=pl.col("stage_exit_date").max())
+        last_stage_exit = stg.group_by("application_id").agg(last_stage_exit=pl.col("stage_exit_date").max())
+        released = pl.max_horizontal(*RELEASE_DATE_COLUMNS)
         attempts = (
             app.select(
                 "application_id",
@@ -878,11 +902,20 @@ class Validator:
                 "requisition_id",
                 "application_date",
                 "application_status_current",
+                "rejected_date",
+                "withdrawal_date",
             )
-            .join(attempt_end, on="application_id", how="left")
+            .join(off.select("application_id", *OFFER_RELEASE_DATE_COLUMNS), on="application_id", how="left")
+            .join(last_stage_exit, on="application_id", how="left")
+            .with_columns(
+                attempt_end=pl.when(released.is_null())
+                .then(pl.lit(None, dtype=pl.Date))
+                .otherwise(pl.max_horizontal(released, pl.col("last_stage_exit")))
+            )
             .sort(["candidate_id", "requisition_id", "application_date", "application_id"])
             .with_columns(
                 prev_end=pl.col("attempt_end").shift(1).over("candidate_id", "requisition_id"),
+                # not part of the rule; carried so a failure sample says which attempt is in the way
                 prev_status=pl.col("application_status_current").shift(1).over("candidate_id", "requisition_id"),
                 prev_id=pl.col("application_id").shift(1).over("candidate_id", "requisition_id"),
             )
@@ -890,9 +923,7 @@ class Validator:
         self._expect_empty(
             "application: a repeated attempt starts after the previous one ended",
             attempts.filter(pl.col("prev_id").is_not_null()),
-            (pl.col("prev_status") == "active")
-            | pl.col("prev_end").is_null()
-            | (pl.col("application_date") <= pl.col("prev_end")),
+            pl.col("prev_end").is_null() | (pl.col("application_date") <= pl.col("prev_end")),
         )
 
     # ------------------------------------------------------------------ candidate realism

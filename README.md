@@ -31,10 +31,10 @@ risk bands, no cohort maturity, no stage yields, no KPIs. Those derivations belo
 ```bash
 uv sync --all-groups                 # Python 3.11+, installs polars, numpy, pyyaml, pydantic (+ pytest, ruff)
 uv run ta-gen generate               # writes data/raw/*.csv and runs source validation (about 10 s)
-uv run ta-gen validate               # re-runs the 160 source-level checks on data/raw
+uv run ta-gen validate               # re-runs the 161 source-level checks on data/raw
 uv run ta-gen summary                # prints the indicative data-story summary (never written to the outputs)
 uv run ta-gen fixtures               # rewrites the deliberately invalid extracts under data/fixtures/invalid
-uv run pytest                        # 45 tests on scaled-down runs (about 40 s)
+uv run pytest                        # 48 tests on scaled-down runs (about 40 s)
 uv run ruff check src tests
 ```
 
@@ -99,9 +99,10 @@ visual's default Target Hire Date selection cannot show anything but the Missed 
 6. **Timestamps** (`timestamps.py`): `extracted_at` from the configuration, and `updated_at`
    from the day each record actually changed. Re-exporting an unchanged row repeats its
    timestamp; a real change advances it, never backwards.
-7. **Validation** (`validate.py`): 160 source-level checks. It starts with the declared
-   shape of every file - the columns, their data types, and which values may never be
-   empty - because every rule after that assumes it holds. Then keys inside the extract,
+7. **Validation** (`validate.py`): 161 source-level checks. It starts with the declared
+   shape of the extract - the files, their columns, each column's data type, and which
+   values may never be empty - before anything reads the data, because every rule after
+   that assumes it holds. Then keys inside the extract,
    referential integrity, date order, nothing after the as-of date, the raw timestamp rules,
    seat identity on every snapshot, offer / status consistency, HR consistency, and
    candidate realism: nobody holds two live acceptances, is started twice, keeps applying

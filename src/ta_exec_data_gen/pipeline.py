@@ -102,9 +102,11 @@ def _drop_overlapping_attempts(apps: pl.DataFrame) -> pl.DataFrame:
     """Undo any candidate merge that would put one person twice in the same live process.
 
     Repeating a candidate/requisition pair is allowed, but only as consecutive attempts: the
-    earlier one must have finished before the later one was submitted. Anything else - a
-    still-active earlier attempt, or two applications running side by side - is an impossible
-    person, so the later application keeps its own candidate.
+    earlier one must have released the candidate before the later one was submitted. Anything
+    else - a still-active earlier attempt, an attempt still holding an acceptance, or two
+    applications running side by side - is an impossible person, so the later application keeps
+    its own candidate. Only a recorded loss releases someone: an acceptance commits them, and a
+    started application never frees them at all, which is the rule the validator checks too.
     """
     groups = (
         apps.select("candidate_raw", "req_idx")
@@ -121,11 +123,11 @@ def _drop_overlapping_attempts(apps: pl.DataFrame) -> pl.DataFrame:
     ):
         open_until: int | None = None
         for row in part.iter_rows(named=True):
-            finished = row["status"] != "active"
+            released = row["status"] in LOSS_STATUSES
             if open_until is not None and (open_until == NO_DAY or row["application_day"] <= open_until):
                 reassign.append(int(row["app_idx"]))
                 continue
-            open_until = int(row["status_day"]) if finished else NO_DAY
+            open_until = int(row["status_day"]) if released else NO_DAY
     if not reassign:
         return apps
     return apps.with_columns(

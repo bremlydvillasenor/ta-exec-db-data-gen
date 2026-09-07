@@ -113,10 +113,13 @@ another module made.
     holds two live acceptances, none is started twice, none is still an active candidate
     elsewhere after taking a seat, none submits a new application after the day they accepted
     one, and two attempts at the same requisition never overlap - the earlier one must have
-    left the process and closed its last stage before the later one is submitted. That last
-    pair of rules needs the application date rather than the final status: an application in
-    flight before an acceptance and later rejected is fine, one *submitted* afterwards is
-    not. A merge that would break any of them is undone and the application keeps its own
+    **released** the candidate before the later one is submitted. Only a recorded loss
+    releases someone. The last stage exit is not the same thing: the Offer stage closes on
+    acceptance, so a stage-based end would treat the weeks between an acceptance and a later
+    rescind or renege as free, and an attempt still holding a live acceptance has no end at
+    all. That pair of rules needs the application date rather than the final status: an
+    application in flight before an acceptance and later rejected is fine, one *submitted*
+    afterwards is not. A merge that would break any of them is undone and the application keeps its own
     candidate, which is why the realised reuse rate is a little below the configured share.
 11. **HR duplicates are deliberate.** About 2% of start events are exact re-sends and about
     3% of terminations have a later-dated second row, so dbt's "one row per started hire,
@@ -160,7 +163,7 @@ another module made.
 
 ## Validation split
 
-`ta-gen validate` (160 checks) proves the source is internally consistent: unique keys
+`ta-gen validate` (161 checks) proves the source is internally consistent: unique keys
 inside the extract, foreign keys, vocabularies, no actual date after the as-of date, target
 dates inside the horizon, the raw timestamp rules, TOAD between approval and THD, seat
 quantities and status consistency on every snapshot, the identity
@@ -171,12 +174,14 @@ events, HR starts only for accepted offers that were not lost, non-overlapping r
 attempts, and the candidate-realism rules in assumption 10. The contract's analytics rules
 (section 12 of `spec.md`) are dbt tests and are not duplicated here.
 
-Before any of that, the validator checks the **declared shape** of every file: the columns
-that must be there, their data type, and which of them may never be empty. That check is a
-precondition and it stops the run when it fails, because every rule after it assumes the
-shape holds. It is not a formality - a comparison against null evaluates to null, so a
-required identifier, status, date or quantity that arrives empty would otherwise slip
-through every range and consistency rule downstream without a single failure.
+Before any of that, the validator checks the **declared shape** of the extract: the files
+that must be there, their columns, each column's data type, and which of them may never be
+empty. That check runs before anything reads the data, and it stops the run when it fails,
+because every rule after it assumes the shape holds. It is not a formality - a comparison
+against null evaluates to null, so a required identifier, status, date or quantity that
+arrives empty would otherwise slip through every range and consistency rule downstream
+without a single failure, while a missing file or key column would end the run in a stack
+trace rather than a finding anyone can read.
 
 The timestamp checks are the group added for contract 1.3: both columns present on every
 file including the lookups, one `extracted_at` for the whole batch, `updated_at <=
@@ -202,7 +207,11 @@ validation, contract alignment (columns, vocabularies, boundaries, no derived co
 the story itself. `test_contract.py` asserts every contract-1.3 minimum column is present,
 that no offer version or cycle identifier exists, that an unchanged requisition row repeats
 its `updated_at` while a real change advances it, and that a candidate can reapply to the
-same requisition after a loss without the two attempts overlapping. The story tests cover segment
+same requisition after a loss without the two attempts overlapping. `test_validation.py`
+also covers the shape check on its own terms - a missing file, a missing key column and an
+undeclared file each produce a finding instead of an exception - and pins the two ways an
+overlap hides: a second attempt inside the window between an acceptance and its later loss,
+and one submitted while an acceptance is still live. The story tests cover segment
 differences, populated risk bands, the constraint-risk link, the interview bottleneck,
 offer losses, reopened requisitions and surge cohorts leaving earlier without a perfect
 relationship; `test_forecast.py` adds the parts a configuration change could weaken

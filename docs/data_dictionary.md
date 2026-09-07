@@ -95,9 +95,11 @@ for 120 days after it closed. dbt must resolve **one row per requisition: the la
 **Grain:** one row per application; `application_id` is the key. A candidate may apply to
 several requisitions **and may apply to the same requisition again** after an earlier
 attempt was lost - contract 1.3 allows the pair to repeat, and the second attempt gets a new
-`application_id`. What the pair may never do is overlap: the earlier attempt must have left
-the process and closed its last stage before the later one was submitted, and one candidate
-never holds two live acceptances. Do not put a uniqueness constraint on
+`application_id`. What the pair may never do is overlap: the earlier attempt must have
+released the candidate - on its recorded rejection, withdrawal, decline, offer withdrawal,
+rescind or renege date - before the later one was submitted, and one candidate never holds
+two live acceptances. An acceptance is not a release, so an attempt that is still active or
+still holds an accepted offer has no end date and nothing may follow it. Do not put a uniqueness constraint on
 (`candidate_id`, `requisition_id`).
 
 | Column | Type | Description |

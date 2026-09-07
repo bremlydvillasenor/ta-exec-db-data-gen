@@ -99,3 +99,131 @@ def test_updated_at_must_reflect_the_latest_recorded_event(tables_medium, cfg_me
         broken[table] = broken[table].with_columns(updated_at=pl.col(column).cast(pl.Datetime("us")))
         failed = [r.name for r in run_validations(broken, cfg_medium) if not r.passed]
         assert expected in failed, f"{table}: a stale updated_at passed validation"
+
+
+def test_a_missing_table_or_column_is_reported_instead_of_crashing(tables_medium, cfg_medium):
+    """The shape check is a precondition, so nothing may touch the data before it runs.
+
+    A missing file used to raise KeyError and a missing key column raised deep inside a
+    Polars expression - both real inputs, neither one producing a finding a reviewer could
+    read.
+    """
+    missing_table = {k: v for k, v in tables_medium.items() if k != "ats_offer"}
+    failed = [r.name for r in run_validations(missing_table, cfg_medium) if not r.passed]
+    assert failed == ["ats_offer: table is present in the extract"]
+
+    for table, column in (
+        ("ats_requisition_snapshot", "snapshot_date"),
+        ("ats_requisition_snapshot", "requisition_id"),
+        ("ats_application", "application_id"),
+        ("ats_offer", "offer_accepted_date"),
+    ):
+        dropped = dict(tables_medium)
+        dropped[table] = dropped[table].drop(column)
+        failed = [r.name for r in run_validations(dropped, cfg_medium) if not r.passed]
+        assert failed == [f"{table}: declared columns are present"], f"{table}.{column}: {failed}"
+
+    undeclared = dict(tables_medium)
+    undeclared["ats_interview"] = tables_medium["ats_application"].head(1)
+    failed = [r.name for r in run_validations(undeclared, cfg_medium) if not r.passed]
+    assert failed == ["extract: no undeclared tables"]
+
+
+def test_a_repeat_attempt_between_acceptance_and_loss_fails(tables_medium, cfg_medium):
+    """An accepted offer ends at its rescind or renege, not when the Offer stage closed.
+
+    The Offer stage exits on acceptance, so a stage-based attempt end made the weeks between
+    acceptance and a later loss look free - and a second application submitted inside that
+    window passed every check.
+    """
+    app, off, stg = (
+        tables_medium["ats_application"],
+        tables_medium["ats_offer"],
+        tables_medium["ats_stage_history"],
+    )
+    lost = (
+        off.filter(
+            pl.col("offer_accepted_date").is_not_null()
+            & (pl.col("offer_rescinded_date").is_not_null() | pl.col("candidate_renege_date").is_not_null())
+        )
+        .select(
+            "application_id",
+            "requisition_id",
+            loss_date=pl.coalesce("offer_rescinded_date", "candidate_renege_date"),
+        )
+        .join(
+            stg.group_by("application_id").agg(last_stage_exit=pl.col("stage_exit_date").max()),
+            on="application_id",
+            how="left",
+        )
+        .join(app.select("application_id", "candidate_id"), on="application_id")
+    )
+    # a second application on the same requisition, submitted after the first attempt's last
+    # stage closed but before the loss that actually ended it
+    overlap = (
+        lost.join(
+            app.select(
+                second_id="application_id",
+                requisition_id="requisition_id",
+                second_candidate="candidate_id",
+                second_date="application_date",
+            ),
+            on="requisition_id",
+        )
+        .filter(
+            (pl.col("second_candidate") != pl.col("candidate_id"))
+            & (pl.col("second_date") > pl.col("last_stage_exit"))
+            & (pl.col("second_date") < pl.col("loss_date"))
+        )
+        .sort(["application_id", "second_id"])
+    )
+    assert overlap.height, "no acceptance-to-loss window to place a second attempt in"
+    case = overlap.row(0, named=True)
+
+    broken = dict(tables_medium)
+    broken["ats_application"] = app.with_columns(
+        candidate_id=pl.when(pl.col("application_id") == case["second_id"])
+        .then(pl.lit(case["candidate_id"]))
+        .otherwise(pl.col("candidate_id"))
+    )
+    failed = [r.name for r in run_validations(broken, cfg_medium) if not r.passed]
+    assert "application: a repeated attempt starts after the previous one ended" in failed
+
+
+def test_an_attempt_still_holding_an_acceptance_never_ends(tables_medium, cfg_medium):
+    """A candidate who took the seat cannot try again for it, however the offer stage looks."""
+    app, off = tables_medium["ats_application"], tables_medium["ats_offer"]
+    live = off.filter(
+        pl.col("offer_accepted_date").is_not_null()
+        & pl.col("offer_rescinded_date").is_null()
+        & pl.col("candidate_renege_date").is_null()
+    ).join(app.select("application_id", "candidate_id", "requisition_id"), on="application_id")
+    # a multi-seat requisition still takes applications after one seat is accepted, so hand
+    # one of those later applications to the person who already holds the seat
+    pairs = (
+        live.join(
+            app.select(
+                second_id="application_id",
+                requisition_id="requisition_id",
+                second_candidate="candidate_id",
+                second_date="application_date",
+            ),
+            on="requisition_id",
+        )
+        .filter(
+            (pl.col("second_candidate") != pl.col("candidate_id"))
+            & (pl.col("second_date") > pl.col("offer_accepted_date"))
+        )
+        .sort(["application_id", "second_id"])
+    )
+    assert pairs.height, "no application submitted after a live acceptance on the same requisition"
+    seat = pairs.row(0, named=True)
+
+    broken = dict(tables_medium)
+    broken["ats_application"] = app.with_columns(
+        candidate_id=pl.when(pl.col("application_id") == seat["second_id"])
+        .then(pl.lit(seat["candidate_id"]))
+        .otherwise(pl.col("candidate_id"))
+    )
+    failed = [r.name for r in run_validations(broken, cfg_medium) if not r.passed]
+    assert "application: a repeated attempt starts after the previous one ended" in failed
