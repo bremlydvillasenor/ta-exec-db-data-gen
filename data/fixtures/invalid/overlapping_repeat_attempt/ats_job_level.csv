@@ -1,0 +1,7 @@
+job_level_code,job_level_name,level_rank,is_active,updated_at,extracted_at
+L1,Associate,1,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+L2,Professional,2,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+L3,Senior,3,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+L4,Lead,4,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+L5,Manager,5,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+L6,Director,6,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z

@@ -203,11 +203,15 @@ offers, 190 are waiting for a start date and 3,290 have started.
 * 496 requisitions have their THD and TOAD pushed out in later snapshots; the latest
   snapshot on or before the as-of date is the reporting state. 88 requisitions visibly
   return from `filled` to `open` after a post-acceptance loss.
-* 3,895 candidates applied to more than one requisition. No candidate holds two live
-  acceptances, is started twice, keeps an application active elsewhere after taking a seat,
-  or applies again once they have accepted one.
-* Deliberately broken extracts live in `data/fixtures/invalid/`, one per documented
-  violation. They are never part of `data/raw` and must not be loaded.
+* 3,733 candidates applied to more than one requisition, and 1,695 applied to the **same**
+  requisition again after an earlier attempt was lost. Contract 1.3 allows that pair to
+  repeat, so the second attempt is a new `application_id`, not a duplicate: 1,384 follow a
+  rejection, 307 a withdrawal, 3 a declined offer and 1 a candidate renege. 68 of those
+  second attempts went on to succeed. The attempts never overlap, and no candidate holds two
+  live acceptances, is started twice, keeps an application active elsewhere after taking a
+  seat, or applies again once they hold an accepted offer.
+* Deliberately broken extracts live in `data/fixtures/invalid/`, twelve of them, one per
+  documented violation. They are never part of `data/raw` and must not be loaded.
 
 ## 10. Reconciling with the wireframe
 

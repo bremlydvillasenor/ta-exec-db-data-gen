@@ -148,6 +148,7 @@ class FunnelConfig(StrictModel):
     withdrawn_share_of_exits: float = Field(ge=0, le=1)
     offer_withdrawn_share: float = Field(ge=0, le=1)
     candidate_pool_reuse: float = Field(ge=0, le=1)
+    reapplication_share: float = Field(ge=0, le=1)
     disposition_reasons: DispositionReasons
 
 

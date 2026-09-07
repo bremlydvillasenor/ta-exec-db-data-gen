@@ -1,0 +1,7 @@
+business_unit_code,business_unit_name,sort_order,is_active,updated_at,extracted_at
+ENG,Engineering,1,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+PRD,Product & Marketing,2,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+SAL,Sales,3,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+CSX,Customer Success,4,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+OPS,Operations,5,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+GNA,General & Administrative,6,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z

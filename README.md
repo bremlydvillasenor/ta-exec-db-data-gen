@@ -31,10 +31,10 @@ risk bands, no cohort maturity, no stage yields, no KPIs. Those derivations belo
 ```bash
 uv sync --all-groups                 # Python 3.11+, installs polars, numpy, pyyaml, pydantic (+ pytest, ruff)
 uv run ta-gen generate               # writes data/raw/*.csv and runs source validation (about 10 s)
-uv run ta-gen validate               # re-runs the 127 source-level checks on data/raw
+uv run ta-gen validate               # re-runs the 160 source-level checks on data/raw
 uv run ta-gen summary                # prints the indicative data-story summary (never written to the outputs)
 uv run ta-gen fixtures               # rewrites the deliberately invalid extracts under data/fixtures/invalid
-uv run pytest                        # 41 tests on scaled-down runs (about 20 s)
+uv run pytest                        # 45 tests on scaled-down runs (about 40 s)
 uv run ruff check src tests
 ```
 
@@ -59,8 +59,9 @@ the contract's logical file names is in the data dictionary.
 | `ats_offer.csv` | `offers.csv` | one **current** offer row per application with an issued offer | 5,042 | `stg_ats__offer` |
 | `hr_worker_event.csv` | `worker_events.csv` | one row per HR start / termination event | 4,018 | `stg_hr__worker_event` |
 
-`data/fixtures/invalid/` holds one deliberately broken extract per documented violation, so
-the source validation can be shown to catch each failure mode. It is never loaded by dbt.
+`data/fixtures/invalid/` holds twelve deliberately broken extracts, one per documented
+violation, so the source validation can be shown to catch each failure mode. It is never
+loaded by dbt.
 
 Column-level definitions are in [`docs/data_dictionary.md`](docs/data_dictionary.md). The
 intended executive story and the numbers it produces are in
@@ -98,11 +99,13 @@ visual's default Target Hire Date selection cannot show anything but the Missed 
 6. **Timestamps** (`timestamps.py`): `extracted_at` from the configuration, and `updated_at`
    from the day each record actually changed. Re-exporting an unchanged row repeats its
    timestamp; a real change advances it, never backwards.
-7. **Validation** (`validate.py`): 127 source-level checks (keys inside the extract,
-   referential integrity, date order, nothing after the as-of date, the raw timestamp
-   rules, seat identity on every snapshot, offer / status consistency, HR consistency, and
-   candidate realism - nobody holds two live acceptances, is started twice, or keeps
-   applying after taking a seat).
+7. **Validation** (`validate.py`): 160 source-level checks. It starts with the declared
+   shape of every file - the columns, their data types, and which values may never be
+   empty - because every rule after that assumes it holds. Then keys inside the extract,
+   referential integrity, date order, nothing after the as-of date, the raw timestamp rules,
+   seat identity on every snapshot, offer / status consistency, HR consistency, and
+   candidate realism: nobody holds two live acceptances, is started twice, keeps applying
+   after taking a seat, or runs two overlapping attempts at one requisition.
 
 All behaviour is configured in `config/default.yaml`. Randomness comes from named numpy
 streams derived from one seed (`rng.py`), so changing one module's draws does not reshuffle

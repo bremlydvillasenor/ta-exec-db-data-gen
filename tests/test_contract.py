@@ -260,6 +260,34 @@ def test_raw_timestamps_follow_the_contract(tables_small, cfg_small):
     assert moved.height > 0, "a real source change must advance updated_at"
 
 
+def test_a_candidate_may_reapply_to_the_same_requisition_after_a_loss(tables_medium):
+    """Contract 1.3 allows the candidate/requisition pair to repeat with a new application id.
+
+    Pair uniqueness would forbid the reapplication the contract explicitly permits, so what
+    has to hold instead is that the attempts are consecutive: the earlier one left the
+    process, and its last stage closed, before the later one was submitted.
+    """
+    app = tables_medium["ats_application"]
+    stg = tables_medium["ats_stage_history"]
+    assert app["application_id"].n_unique() == app.height, "application_id stays unique"
+
+    repeats = app.group_by("candidate_id", "requisition_id").len().filter(pl.col("len") > 1)
+    assert repeats.height > 0, "the data must contain a valid reapplication-after-loss example"
+
+    attempts = (
+        app.join(repeats.select("candidate_id", "requisition_id"), on=["candidate_id", "requisition_id"], how="semi")
+        .join(stg.group_by("application_id").agg(end=pl.col("stage_exit_date").max()), on="application_id")
+        .sort(["candidate_id", "requisition_id", "application_date"])
+        .with_columns(
+            prev_end=pl.col("end").shift(1).over("candidate_id", "requisition_id"),
+            prev_status=pl.col("application_status_current").shift(1).over("candidate_id", "requisition_id"),
+        )
+        .filter(pl.col("prev_end").is_not_null())
+    )
+    assert (attempts["application_date"] > attempts["prev_end"]).all(), "attempts must not overlap"
+    assert (attempts["prev_status"] != "active").all(), "the earlier attempt must have ended"
+
+
 def test_every_requisition_is_in_the_as_of_extract(tables_medium, cfg_medium):
     snap = tables_medium["ats_requisition_snapshot"]
     as_of_rows = snap.filter(pl.col("snapshot_date") == cfg_medium.dates.as_of)

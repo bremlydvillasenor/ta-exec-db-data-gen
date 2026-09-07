@@ -95,6 +95,82 @@ def _split_conflicting_reuse(
     return resolved
 
 
+LOSS_STATUSES = ("rejected", "withdrawn", "offer_declined", "offer_withdrawn", "offer_rescinded", "candidate_renege")
+
+
+def _drop_overlapping_attempts(apps: pl.DataFrame) -> pl.DataFrame:
+    """Undo any candidate merge that would put one person twice in the same live process.
+
+    Repeating a candidate/requisition pair is allowed, but only as consecutive attempts: the
+    earlier one must have finished before the later one was submitted. Anything else - a
+    still-active earlier attempt, or two applications running side by side - is an impossible
+    person, so the later application keeps its own candidate.
+    """
+    groups = (
+        apps.select("candidate_raw", "req_idx")
+        .group_by("candidate_raw", "req_idx")
+        .len()
+        .filter(pl.col("len") > 1)
+    )
+    if groups.height == 0:
+        return apps
+    repeated = apps.join(groups.select("candidate_raw", "req_idx"), on=["candidate_raw", "req_idx"], how="semi")
+    reassign: list[int] = []
+    for (_, _), part in repeated.sort("application_day", "app_idx").group_by(
+        ["candidate_raw", "req_idx"], maintain_order=True
+    ):
+        open_until: int | None = None
+        for row in part.iter_rows(named=True):
+            finished = row["status"] != "active"
+            if open_until is not None and (open_until == NO_DAY or row["application_day"] <= open_until):
+                reassign.append(int(row["app_idx"]))
+                continue
+            open_until = int(row["status_day"]) if finished else NO_DAY
+    if not reassign:
+        return apps
+    return apps.with_columns(
+        candidate_raw=pl.when(pl.col("app_idx").is_in(reassign))
+        .then(pl.col("app_idx"))
+        .otherwise(pl.col("candidate_raw"))
+    )
+
+
+def _reapplication_donors(apps: pl.DataFrame, rng: np.random.Generator, share: float) -> np.ndarray:
+    """Propose, for some applications, an earlier attempt by the same person on the same requisition.
+
+    The contract allows a candidate/requisition pair to repeat: a genuine second attempt after
+    a loss uses a **new** application ID. The earlier attempt has to be finished before the
+    later one is submitted - nobody applies twice while still in process - so only applications
+    that ended in a loss, on or before the new application date, are eligible donors.
+
+    Returns a donor row index per row, or -1 where no reapplication is proposed.
+    """
+    n = apps.height
+    out = np.full(n, -1, dtype=np.int64)
+    if share <= 0 or n == 0:
+        return out
+    status = apps["status"].to_list()
+    applied = apps["application_day"].to_numpy()
+    ended = apps["status_day"].to_numpy()
+    req = apps["req_idx"].to_numpy()
+    draw = rng.random(n)
+    # rows are already in application-date order, so one pass per requisition is enough
+    order = np.argsort(req, kind="stable")
+    finished_by_req: dict[int, list[int]] = {}
+    for i in order:
+        r = int(req[i])
+        pool = finished_by_req.setdefault(r, [])
+        if draw[i] < share:
+            # the most recent finished attempt that had already ended when this one arrived
+            for j in reversed(pool):
+                if ended[j] < applied[i]:
+                    out[i] = j
+                    break
+        if status[i] in LOSS_STATUSES:
+            pool.append(int(i))
+    return out
+
+
 def assign_candidates(apps: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory) -> pl.DataFrame:
     """Give every application a candidate; some candidates apply to several requisitions."""
     rng = rngs.stream("candidates")
@@ -103,15 +179,14 @@ def assign_candidates(apps: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory
     reuse = rng.random(n) < cfg.funnel.candidate_pool_reuse
     donor = rng.integers(0, n, size=n)
     req = apps["req_idx"].to_numpy()
-    # only reuse a candidate who applied to a different requisition, and only once per pair
+    # cross-requisition reuse: a different requisition, and only from an earlier application
     ok = reuse & (req[donor] != req) & (donor < np.arange(n))
     candidate = np.where(ok, candidate[donor], candidate)
+    # same-requisition reapplication after a loss, which the contract explicitly allows
+    again = _reapplication_donors(apps, rng, cfg.funnel.reapplication_share)
+    candidate = np.where(again >= 0, candidate[again], candidate)
     apps = apps.with_columns(candidate_raw=pl.Series(candidate))
-    apps = (
-        apps.with_columns(dup=pl.col("app_idx").rank("ordinal").over("candidate_raw", "req_idx") > 1)
-        .with_columns(candidate_raw=pl.when(pl.col("dup")).then(pl.col("app_idx")).otherwise(pl.col("candidate_raw")))
-        .drop("dup")
-    )
+    apps = _drop_overlapping_attempts(apps)
     # a live acceptance takes the seat; an active application keeps the person in a pipeline
     holds_seat = (apps["offer_accepted_day"].to_numpy() != NO_DAY) & (
         (apps["offer_rescinded_day"].to_numpy() == NO_DAY) & (apps["candidate_renege_day"].to_numpy() == NO_DAY)

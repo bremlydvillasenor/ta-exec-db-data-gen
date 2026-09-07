@@ -1,0 +1,11 @@
+job_family_code,job_family_name,sort_order,is_active,updated_at,extracted_at
+SWE,Software Engineering,1,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+DAT,Data & Analytics,2,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+ITS,IT & Security,3,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+PDM,Product Management,4,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+MKT,Marketing,5,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+SLS,Sales,6,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+CSM,Customer Success,7,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+OPS,Operations,8,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+FIN,Finance,9,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z
+PPL,People & Talent,10,true,2023-12-01T09:00:00Z,2026-05-31T23:59:59Z

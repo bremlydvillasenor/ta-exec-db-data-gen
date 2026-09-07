@@ -11,3 +11,10 @@ validation catches the failure mode. Never load them with dbt.
 | `hr_event_after_as_of` | an actual HR start dated after the reporting as-of date | contains `event_date <= as_of` |
 | `updated_at_after_extracted_at` | `updated_at` later than the extract that contains it | contains `updated_at <= extracted_at` |
 | `seat_identity_broken` | `requested_positions` no longer equals active fills plus openings | contains `requested = active fills + openings` |
+| `missing_identifier` | a required identifier (`candidate_id`) left empty | contains `ats_application: required columns have no missing values` |
+| `missing_status` | a required status (`offer_status_current`) left empty | contains `ats_offer: required columns have no missing values` |
+| `missing_date` | a required date (`event_date`) left empty | contains `hr_worker_event: required columns have no missing values` |
+| `missing_quantity` | a required quantity (`openings_position`) left empty | contains `ats_requisition_snapshot: required columns have no missing values` |
+| `missing_lookup_name` | a required lookup label (`business_unit_name`) left empty | contains `ats_business_unit: required columns have no missing values` |
+| `stale_updated_at` | a stage exit recorded without advancing `updated_at` | contains `stage_history: updated_at reflects its latest recorded date` |
+| `overlapping_repeat_attempt` | a second attempt submitted before the first one ended | contains `a repeated attempt starts after the previous one ended` |

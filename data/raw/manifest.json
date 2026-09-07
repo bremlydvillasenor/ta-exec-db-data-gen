@@ -6,11 +6,11 @@
   },
   "generator": {
     "package": "ta-exec-data-gen",
-    "commit": "12a0782d2824fbb9b5e3a9aa0eba9bf07f523a8f",
-    "working_tree_clean": true
+    "commit": "8eadaeab3483e9ceb78168b82ff47808a9ec31b6",
+    "working_tree_clean": false
   },
   "seed": 20260531,
-  "config_fingerprint": "35bb828aa0839b9e",
+  "config_fingerprint": "9a9903d6da2e0b58",
   "as_of_date": "2026-05-31",
   "history_start_date": "2024-01-01",
   "future_thd_end_date": "2027-05-31",
@@ -20,7 +20,7 @@
   "extract_mode": "complete",
   "validation": {
     "status": "passed",
-    "checks": 127,
+    "checks": 160,
     "failed_checks": []
   },
   "effective_configuration": {
@@ -157,6 +157,7 @@
       "withdrawn_share_of_exits": 0.18,
       "offer_withdrawn_share": 0.04,
       "candidate_pool_reuse": 0.12,
+      "reapplication_share": 0.03,
       "disposition_reasons": {
         "rejected": [
           "not_qualified",
@@ -796,7 +797,7 @@
         "updated_at",
         "extracted_at"
       ],
-      "sha256": "989ce2e99734706f1caac4e6d1f855632bb1a2f99a0b312360bc4c404de61fa1"
+      "sha256": "64319e81b3fbe5dfef57e2209bf3db0ff51c0e422f97265c2c1d08cd8f28e1f6"
     },
     "ats_stage_history": {
       "file": "ats_stage_history.csv",
@@ -850,7 +851,7 @@
         "updated_at",
         "extracted_at"
       ],
-      "sha256": "8d4037cbc75ca444838bc0d1da67af5a635d170a85c686a5b696704024949485"
+      "sha256": "2af35d2e36e770e7e76849c8e31e00b8684ae446f0558486ef40c69d713dd8b4"
     }
   }
 }

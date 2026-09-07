@@ -25,6 +25,50 @@ Tables = dict[str, pl.DataFrame]
 Mutation = Callable[[Tables, GeneratorConfig], Tables]
 
 
+def _null_first_value(table: str, column: str) -> Mutation:
+    """Blank one required value - the failure mode a comparison-based check cannot see."""
+
+    def mutate(tables: Tables, cfg: GeneratorConfig) -> Tables:
+        frame = tables[table]
+        tables[table] = frame.with_columns(
+            pl.when(pl.int_range(pl.len()) == 0).then(None).otherwise(pl.col(column)).alias(column)
+        )
+        return tables
+
+    return mutate
+
+
+def _stale_updated_at(tables: Tables, cfg: GeneratorConfig) -> Tables:
+    """A stage exit recorded without advancing updated_at, so an incremental load misses it."""
+    stg = tables["ats_stage_history"]
+    target = stg.filter(pl.col("stage_exit_date").is_not_null()).head(1)["stage_event_id"].to_list()
+    tables["ats_stage_history"] = stg.with_columns(
+        updated_at=pl.when(pl.col("stage_event_id").is_in(target))
+        .then(pl.col("stage_entry_date").cast(pl.Datetime("us")))
+        .otherwise(pl.col("updated_at"))
+    )
+    return tables
+
+
+def _overlapping_repeat_attempt(tables: Tables, cfg: GeneratorConfig) -> Tables:
+    """A second attempt at the same requisition submitted before the first one ended."""
+    app = tables["ats_application"]
+    pairs = app.group_by("candidate_id", "requisition_id").len().filter(pl.col("len") > 1)
+    if pairs.height == 0:  # pragma: no cover - the default configuration always has repeats
+        raise ValueError("no repeated candidate/requisition attempt to make overlap")
+    key = pairs.head(1).row(0, named=True)
+    rows = app.filter(
+        (pl.col("candidate_id") == key["candidate_id"]) & (pl.col("requisition_id") == key["requisition_id"])
+    ).sort("application_date")
+    later = [rows["application_id"][1]]
+    tables["ats_application"] = app.with_columns(
+        application_date=pl.when(pl.col("application_id").is_in(later))
+        .then(pl.lit(rows["application_date"][0]))
+        .otherwise(pl.col("application_date"))
+    )
+    return tables
+
+
 def _duplicate_offer_key(tables: Tables, cfg: GeneratorConfig) -> Tables:
     """Two rows for one application in one extract: a duplicate key, never a second offer."""
     off = tables["ats_offer"]
@@ -84,6 +128,31 @@ INVALID_CASES: dict[str, tuple[Mutation, str]] = {
     "hr_event_after_as_of": (_event_after_as_of, "event_date <= as_of"),
     "updated_at_after_extracted_at": (_updated_after_extracted, "updated_at <= extracted_at"),
     "seat_identity_broken": (_seat_identity_broken, "requested = active fills + openings"),
+    "missing_identifier": (
+        _null_first_value("ats_application", "candidate_id"),
+        "ats_application: required columns have no missing values",
+    ),
+    "missing_status": (
+        _null_first_value("ats_offer", "offer_status_current"),
+        "ats_offer: required columns have no missing values",
+    ),
+    "missing_date": (
+        _null_first_value("hr_worker_event", "event_date"),
+        "hr_worker_event: required columns have no missing values",
+    ),
+    "missing_quantity": (
+        _null_first_value("ats_requisition_snapshot", "openings_position"),
+        "ats_requisition_snapshot: required columns have no missing values",
+    ),
+    "missing_lookup_name": (
+        _null_first_value("ats_business_unit", "business_unit_name"),
+        "ats_business_unit: required columns have no missing values",
+    ),
+    "stale_updated_at": (_stale_updated_at, "stage_history: updated_at reflects its latest recorded date"),
+    "overlapping_repeat_attempt": (
+        _overlapping_repeat_attempt,
+        "a repeated attempt starts after the previous one ended",
+    ),
 }
 
 
@@ -142,6 +211,13 @@ def _readme() -> str:
         "hr_event_after_as_of": "an actual HR start dated after the reporting as-of date",
         "updated_at_after_extracted_at": "`updated_at` later than the extract that contains it",
         "seat_identity_broken": "`requested_positions` no longer equals active fills plus openings",
+        "missing_identifier": "a required identifier (`candidate_id`) left empty",
+        "missing_status": "a required status (`offer_status_current`) left empty",
+        "missing_date": "a required date (`event_date`) left empty",
+        "missing_quantity": "a required quantity (`openings_position`) left empty",
+        "missing_lookup_name": "a required lookup label (`business_unit_name`) left empty",
+        "stale_updated_at": "a stage exit recorded without advancing `updated_at`",
+        "overlapping_repeat_attempt": "a second attempt submitted before the first one ended",
     }
     for name, (_, expected) in INVALID_CASES.items():
         lines.append(f"| `{name}` | {descriptions[name]} | contains `{expected}` |")

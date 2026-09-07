@@ -43,6 +43,126 @@ LOOKUP_CODES = {
     "ats_job_level": "job_level_code",
 }
 
+# Declared shape of every raw file: the column, its kind, and whether a null is allowed.
+# "text" / "date" / "integer" / "boolean" / "timestamp" are checked against the loaded dtype,
+# so a column that arrives as the wrong type - or entirely empty - fails here rather than
+# slipping through a comparison that silently evaluates to null.
+TEXT, DATE, INTEGER, BOOLEAN, TIMESTAMP = "text", "date", "integer", "boolean", "timestamp"
+REQUIRED, NULLABLE = True, False
+
+SCHEMA: dict[str, dict[str, tuple[str, bool]]] = {
+    "ats_business_unit": {
+        "business_unit_code": (TEXT, REQUIRED),
+        "business_unit_name": (TEXT, REQUIRED),
+        "sort_order": (INTEGER, REQUIRED),
+        "is_active": (BOOLEAN, REQUIRED),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_job_family": {
+        "job_family_code": (TEXT, REQUIRED),
+        "job_family_name": (TEXT, REQUIRED),
+        "sort_order": (INTEGER, REQUIRED),
+        "is_active": (BOOLEAN, REQUIRED),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_job_level": {
+        "job_level_code": (TEXT, REQUIRED),
+        "job_level_name": (TEXT, REQUIRED),
+        "level_rank": (INTEGER, REQUIRED),
+        "is_active": (BOOLEAN, REQUIRED),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_requisition_snapshot": {
+        "snapshot_date": (DATE, REQUIRED),
+        "requisition_id": (TEXT, REQUIRED),
+        "requisition_title": (TEXT, REQUIRED),
+        "business_unit_code": (TEXT, REQUIRED),
+        "job_family_code": (TEXT, REQUIRED),
+        "job_level_code": (TEXT, REQUIRED),
+        "work_location": (TEXT, REQUIRED),
+        "hiring_manager_id": (TEXT, REQUIRED),
+        "recruiter_id": (TEXT, REQUIRED),
+        "requisition_status": (TEXT, REQUIRED),
+        "approval_date": (DATE, REQUIRED),
+        "target_hire_date": (DATE, REQUIRED),
+        "target_offer_acceptance_date": (DATE, REQUIRED),
+        "requested_positions": (INTEGER, REQUIRED),
+        "openings_position": (INTEGER, REQUIRED),
+        "cancelled_positions": (INTEGER, REQUIRED),
+        "hiring_constraint_code": (TEXT, REQUIRED),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_application": {
+        "application_id": (TEXT, REQUIRED),
+        "candidate_id": (TEXT, REQUIRED),
+        "requisition_id": (TEXT, REQUIRED),
+        "application_date": (DATE, REQUIRED),
+        "source_channel": (TEXT, REQUIRED),
+        "application_status_current": (TEXT, REQUIRED),
+        "current_stage_code": (TEXT, REQUIRED),
+        "rejected_date": (DATE, NULLABLE),
+        "withdrawal_date": (DATE, NULLABLE),
+        "disposition_reason": (TEXT, NULLABLE),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_stage_history": {
+        "stage_event_id": (TEXT, REQUIRED),
+        "application_id": (TEXT, REQUIRED),
+        "stage_code": (TEXT, REQUIRED),
+        "stage_sequence_number": (INTEGER, REQUIRED),
+        "stage_entry_date": (DATE, REQUIRED),
+        "stage_exit_date": (DATE, NULLABLE),
+        "exit_reason": (TEXT, NULLABLE),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "ats_offer": {
+        "application_id": (TEXT, REQUIRED),
+        "requisition_id": (TEXT, REQUIRED),
+        "offer_status_current": (TEXT, REQUIRED),
+        "offer_extended_date": (DATE, REQUIRED),
+        "offer_accepted_date": (DATE, NULLABLE),
+        "offer_declined_date": (DATE, NULLABLE),
+        "offer_withdrawn_date": (DATE, NULLABLE),
+        "offer_rescinded_date": (DATE, NULLABLE),
+        "candidate_renege_date": (DATE, NULLABLE),
+        "planned_start_date": (DATE, NULLABLE),
+        "base_salary": (INTEGER, REQUIRED),
+        "currency": (TEXT, REQUIRED),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+    "hr_worker_event": {
+        "worker_event_id": (TEXT, REQUIRED),
+        "worker_id": (TEXT, REQUIRED),
+        "candidate_id": (TEXT, REQUIRED),
+        "application_id": (TEXT, REQUIRED),
+        "requisition_id": (TEXT, REQUIRED),
+        "event_type": (TEXT, REQUIRED),
+        "event_date": (DATE, REQUIRED),
+        "termination_reason": (TEXT, NULLABLE),
+        "updated_at": (TIMESTAMP, REQUIRED),
+        "extracted_at": (TIMESTAMP, REQUIRED),
+    },
+}
+
+
+def _kind_matches(dtype: pl.DataType, kind: str) -> bool:
+    if kind == TEXT:
+        return dtype == pl.Utf8
+    if kind == DATE:
+        return dtype == pl.Date
+    if kind == INTEGER:
+        return dtype.is_integer()
+    if kind == BOOLEAN:
+        return dtype == pl.Boolean
+    return isinstance(dtype, pl.Datetime)
+
 
 @dataclass
 class CheckResult:
@@ -128,10 +248,18 @@ class Validator:
         latest = self._latest_snapshot()
         as_of = pl.lit(self.as_of)
 
+        # declared shape: columns, data types, and required values ------------------
+        # This runs first and is a precondition, not one check among many. Every rule below
+        # assumes the declared columns exist with the declared type; comparing a date against
+        # a string raises, and comparing anything against a missing value quietly yields null.
+        # So if the shape is wrong, report that and stop rather than produce noise or crash.
+        self._check_schema()
+        if any(not r.passed for r in self.results):
+            return self.results
+
         # keys ----------------------------------------------------------------
         self._unique("snapshot: unique (requisition_id, snapshot_date)", snap, ["requisition_id", "snapshot_date"])
         self._unique("application: unique application_id", app, ["application_id"])
-        self._unique("application: unique (candidate_id, requisition_id)", app, ["candidate_id", "requisition_id"])
         self._unique("stage_history: unique stage_event_id", stg, ["stage_event_id"])
         self._unique(
             "stage_history: unique (application_id, stage_sequence_number)",
@@ -241,9 +369,54 @@ class Validator:
         # HR -------------------------------------------------------------------------------
         self._check_hr(app, hr)
 
-        # candidate realism ------------------------------------------------------------------
+        # repeat attempts and candidate realism -------------------------------------------------
+        self._check_repeat_attempts(app, stg)
         self._check_candidate_realism(app, hr)
         return self.results
+
+    # ------------------------------------------------------------------ declared shape
+    def _check_schema(self) -> None:
+        """Every file has the declared columns, of the declared type, with no missing values.
+
+        Comparison-based rules cannot do this job: in SQL and in Polars a comparison against
+        null evaluates to null, so a required identifier, status or quantity that arrives
+        empty slips silently through every range and consistency check downstream. This is
+        the check that stops that, and it runs before any of them.
+        """
+        for name, columns in SCHEMA.items():
+            frame = self.t.get(name)
+            if frame is None:
+                self._fail(f"{name}: table is present in the extract", pl.DataFrame({"missing_table": [name]}))
+                continue
+            missing = [c for c in columns if c not in frame.columns]
+            self._fail(
+                f"{name}: declared columns are present",
+                pl.DataFrame({"missing_column": missing}) if missing else pl.DataFrame(),
+            )
+            unexpected = [c for c in frame.columns if c not in columns]
+            self._fail(
+                f"{name}: no undeclared columns",
+                pl.DataFrame({"unexpected_column": unexpected}) if unexpected else pl.DataFrame(),
+            )
+            wrong_type = [
+                {"column": col, "expected": kind, "actual": str(frame.schema[col])}
+                for col, (kind, _) in columns.items()
+                if col in frame.columns and not _kind_matches(frame.schema[col], kind)
+            ]
+            self._fail(
+                f"{name}: columns have the declared data type",
+                pl.DataFrame(wrong_type) if wrong_type else pl.DataFrame(),
+            )
+            required = [col for col, (_, req) in columns.items() if req and col in frame.columns]
+            nulls = [
+                {"column": col, "null_rows": frame[col].null_count()}
+                for col in required
+                if frame[col].null_count() > 0
+            ]
+            self._fail(
+                f"{name}: required columns have no missing values",
+                pl.DataFrame(nulls) if nulls else pl.DataFrame(),
+            )
 
     # ------------------------------------------------------------------ timestamps
     def _check_timestamps(self) -> None:
@@ -280,20 +453,37 @@ class Validator:
             .with_columns(prev=pl.col("updated_at").shift(1).over("requisition_id")),
             pl.col("prev").is_not_null() & (pl.col("updated_at") < pl.col("prev")),
         )
+        # `updated_at` has to reflect the LATEST recorded change on the row, not just the
+        # first one. A record whose timestamp stops at its opening event looks unchanged to
+        # an incremental load, so the later exit, acceptance or loss would never be picked up.
         self._expect_empty(
-            "application: updated_at is not before the application date",
+            "snapshot: updated_at is not before the approval date",
+            self.t["ats_requisition_snapshot"],
+            pl.col("updated_at").dt.date() < pl.col("approval_date"),
+        )
+        self._expect_empty(
+            "application: updated_at reflects its latest recorded date",
             self.t["ats_application"],
-            pl.col("updated_at").dt.date() < pl.col("application_date"),
+            pl.col("updated_at").dt.date()
+            < pl.max_horizontal("application_date", "rejected_date", "withdrawal_date"),
         )
         self._expect_empty(
-            "stage_history: updated_at is not before the stage entry date",
+            "stage_history: updated_at reflects its latest recorded date",
             self.t["ats_stage_history"],
-            pl.col("updated_at").dt.date() < pl.col("stage_entry_date"),
+            pl.col("updated_at").dt.date() < pl.max_horizontal("stage_entry_date", "stage_exit_date"),
         )
         self._expect_empty(
-            "offer: updated_at is not before the offer extended date",
+            "offer: updated_at reflects its latest recorded date",
             self.t["ats_offer"],
-            pl.col("updated_at").dt.date() < pl.col("offer_extended_date"),
+            pl.col("updated_at").dt.date()
+            < pl.max_horizontal(
+                "offer_extended_date",
+                "offer_accepted_date",
+                "offer_declined_date",
+                "offer_withdrawn_date",
+                "offer_rescinded_date",
+                "candidate_renege_date",
+            ),
         )
         self._expect_empty(
             "worker_event: updated_at is not before the event date",
@@ -667,6 +857,42 @@ class Validator:
             "worker_event: terminated workers have a start event",
             terms.join(starts.select("worker_id").unique(), on="worker_id", how="anti"),
             pl.lit(True),
+        )
+
+    # ------------------------------------------------------------------ repeat attempts
+    def _check_repeat_attempts(self, app: pl.DataFrame, stg: pl.DataFrame) -> None:
+        """A candidate/requisition pair may repeat, as consecutive attempts with new IDs.
+
+        Contract 1.3 allows a genuine second attempt at the same requisition after the first
+        was lost, so pair uniqueness is the wrong rule. What must hold instead is that the
+        attempts do not overlap: the earlier one has to have finished - it left the process,
+        and its last stage closed - before the later one was submitted. Two live attempts by
+        one person on one requisition would be an impossible person, and the active-fill
+        rules below are the other half of the same guarantee.
+        """
+        attempt_end = stg.group_by("application_id").agg(attempt_end=pl.col("stage_exit_date").max())
+        attempts = (
+            app.select(
+                "application_id",
+                "candidate_id",
+                "requisition_id",
+                "application_date",
+                "application_status_current",
+            )
+            .join(attempt_end, on="application_id", how="left")
+            .sort(["candidate_id", "requisition_id", "application_date", "application_id"])
+            .with_columns(
+                prev_end=pl.col("attempt_end").shift(1).over("candidate_id", "requisition_id"),
+                prev_status=pl.col("application_status_current").shift(1).over("candidate_id", "requisition_id"),
+                prev_id=pl.col("application_id").shift(1).over("candidate_id", "requisition_id"),
+            )
+        )
+        self._expect_empty(
+            "application: a repeated attempt starts after the previous one ended",
+            attempts.filter(pl.col("prev_id").is_not_null()),
+            (pl.col("prev_status") == "active")
+            | pl.col("prev_end").is_null()
+            | (pl.col("application_date") <= pl.col("prev_end")),
         )
 
     # ------------------------------------------------------------------ candidate realism
