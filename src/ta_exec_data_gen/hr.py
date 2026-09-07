@@ -1,12 +1,18 @@
-"""HR system worker events: hires (actual employee starts) and terminations.
+"""HR system worker events: actual employee starts and terminations.
 
-The HR extract is event-shaped: one `hire` row per person who started, and one
+The HR extract is event-shaped: one `start` row per person who actually started, and one
 `termination` row when they left. Early exits (within the first weeks) follow the job
 family, level and story episode (rushed surge hiring leaves sooner); later exits follow a
-flat annual hazard. Realistic noise is added on purpose: a small share of hire events are
-re-sent by the integration (exact duplicates with a new event id), and a small share of
-terminations carry a second, later-dated termination row that dbt must resolve to the
-earliest termination after the start.
+flat annual hazard. Only a termination carries a reason, as the contract requires.
+
+Realistic noise is added on purpose: a small share of start events are re-sent by the
+integration (exact duplicates with a new event id), and a small share of terminations
+carry a second, later-dated termination row that dbt must resolve to the earliest
+termination after the start.
+
+`event_changed_day` is when the HR record was created or corrected, which is what the
+row's `updated_at` is built from. It is deliberately later than `event_date`: payroll
+records a start or an exit after it happened.
 """
 
 from __future__ import annotations
@@ -68,10 +74,10 @@ def build_worker_events(
         "app_idx",
         "req_idx",
         "worker_id",
-        event_type=pl.lit("hire"),
+        event_type=pl.lit("start"),
         event_day=pl.col("start_day"),
-        event_reason=pl.lit("new_hire"),
-        record_created_day=pl.col("start_day") + pl.Series(rng.integers(0, 4, n)),
+        termination_reason=pl.lit(None, dtype=pl.Utf8),
+        event_changed_day=pl.col("start_day") + pl.Series(rng.integers(0, 4, n)),
         is_duplicate=pl.lit(False),
     )
     term_frame = hires.with_columns(
@@ -85,15 +91,15 @@ def build_worker_events(
         "worker_id",
         event_type=pl.lit("termination"),
         event_day=pl.col("term_day"),
-        event_reason=pl.col("reason"),
-        record_created_day=pl.col("term_day") + pl.Series(rng.integers(0, 6, term_frame.height)),
+        termination_reason=pl.col("reason"),
+        event_changed_day=pl.col("term_day") + pl.Series(rng.integers(0, 6, term_frame.height)),
         is_duplicate=pl.lit(False),
     )
 
     # integration noise -----------------------------------------------------------
     dup_hires = hire_events.filter(pl.Series(rng.random(hire_events.height) < hc.duplicate_hire_event_share))
     dup_hires = dup_hires.with_columns(
-        record_created_day=pl.col("record_created_day") + pl.Series(rng.integers(1, 15, dup_hires.height)),
+        event_changed_day=pl.col("event_changed_day") + pl.Series(rng.integers(1, 15, dup_hires.height)),
         is_duplicate=pl.lit(True),
     )
     dup_terms = term_events.filter(pl.Series(rng.random(term_events.height) < hc.duplicate_termination_share))
@@ -102,12 +108,12 @@ def build_worker_events(
     )
     dup_terms = dup_terms.with_columns(
         event_day=pl.col("event_day") + pl.Series(shift),
-        record_created_day=pl.col("record_created_day") + pl.Series(shift) + 1,
+        event_changed_day=pl.col("event_changed_day") + pl.Series(shift) + 1,
         is_duplicate=pl.lit(True),
     )
 
     events = pl.concat([hire_events, term_events, dup_hires, dup_terms]).with_columns(
         event_day=pl.min_horizontal(pl.col("event_day"), pl.lit(as_of)),
-        record_created_day=pl.min_horizontal(pl.col("record_created_day"), pl.lit(as_of)),
+        event_changed_day=pl.min_horizontal(pl.col("event_changed_day"), pl.lit(as_of)),
     )
-    return events.sort(["event_day", "worker_id", "event_type", "record_created_day"]).with_row_index("event_seq")
+    return events.sort(["event_day", "worker_id", "event_type", "event_changed_day"]).with_row_index("event_seq")

@@ -3,6 +3,7 @@
 ta-gen generate  --config config/default.yaml [--output data/raw] [--seed N]
 ta-gen validate  --config config/default.yaml [--input data/raw]
 ta-gen summary   --config config/default.yaml [--input data/raw]
+ta-gen fixtures  --config config/default.yaml [--output data/fixtures/invalid]
 """
 
 from __future__ import annotations
@@ -14,10 +15,11 @@ import time
 from pathlib import Path
 
 from .config import load_config
+from .fixtures import INVALID_CASES, write_invalid_fixtures
 from .pipeline import generate
 from .story import format_summary, summarise
 from .validate import format_results, run_validations
-from .writer import read_tables, write_tables
+from .writer import read_tables, write_manifest, write_tables
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -44,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     summ = sub.add_parser("summary", help="print an indicative data-story summary of an output directory")
     _add_common(summ)
     summ.add_argument("--input", default=None)
+
+    fix = sub.add_parser("fixtures", help="write the deliberately invalid extracts used to test validation")
+    _add_common(fix)
+    fix.add_argument("--output", default="data/fixtures/invalid")
+    fix.add_argument("--positions", type=float, default=1.0, help="scaled-down monthly demand for the fixtures")
     return parser
 
 
@@ -67,10 +74,30 @@ def main(argv: list[str] | None = None) -> int:
         for name, frame in tables.items():
             print(f"{name:28s} {frame.height:>9,d} rows")
         if args.skip_validation:
+            write_manifest(tables, out_dir, cfg, validation={"status": "skipped"})
             return 0
         results = run_validations(tables, cfg)
+        passed = all(r.passed for r in results)
+        write_manifest(
+            tables,
+            out_dir,
+            cfg,
+            validation={
+                "status": "passed" if passed else "failed",
+                "checks": len(results),
+                "failed_checks": [r.name for r in results if not r.passed],
+            },
+        )
         print(format_results(results))
-        return 0 if all(r.passed for r in results) else 1
+        return 0 if passed else 1
+
+    if args.command == "fixtures":
+        out_dir = Path(args.output)
+        written = write_invalid_fixtures(cfg, out_dir, base_positions=args.positions)
+        for case, path in written.items():
+            print(f"{case:34s} -> {path}")
+        print(f"{len(INVALID_CASES)} invalid fixtures written to {out_dir}")
+        return 0
 
     in_dir = Path(args.input or cfg.output.directory)
     tables = read_tables(in_dir)

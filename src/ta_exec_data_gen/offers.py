@@ -1,19 +1,21 @@
-"""Offer versions: the ATS offer table with realistic version history.
+"""The current offer extract: one row per application that received an offer.
 
-One offer *cycle* (offer_id) is the offer made to one application. A cycle can carry
-several *versions*:
+Contract 1.3 replaced the offer-version history with a **current-state** extract. An
+application that reached the Offer stage has exactly one row here, carrying the offer as
+it stands on the extraction date:
 
-* the initial version,
-* a negotiation revision before the candidate responds (version 1 becomes `superseded`),
-* administrative revisions after acceptance: a moved start date, a salary correction or a
-  re-issued letter. These are re-recorded as `accepted` with a later acceptance date, so a
-  source application can legitimately carry more than one accepted version. dbt collapses
-  them (earliest acceptance of the same offer_id wins).
+* `offer_status_current` — `pending`, `accepted`, or one of the four reserved loss terms
+  (`offer_declined`, `offer_withdrawn` before acceptance; `offer_rescinded`,
+  `candidate_renege` after it);
+* every dated event that actually happened, with `offer_accepted_date` **preserved** when
+  the offer was later rescinded or reneged;
+* `planned_start_date`, the start date agreed in the letter.
 
-A configurable handful of applications also carry a *second offer cycle* that was accepted
-after the first accepted cycle was lost. These are the ambiguous cases the contract asks
-dbt to quarantine and record in its audit model. Both cycles end in a loss, so no open seat
-depends on how they are resolved.
+Revisions still happen — a re-negotiated salary before the response, a moved start date or
+a corrected salary after acceptance — but they now **edit this row and advance
+`updated_at`**, which is exactly the behaviour the raw-timestamp rules ask a source system
+to expose. No offer cycle or version identifier is produced, and one application can never
+carry more than one acceptance.
 """
 
 from __future__ import annotations
@@ -40,13 +42,13 @@ JF_SALARY_FACTOR = {
     "PPL": 0.95,
 }
 
+OFFER_STATUSES = ["pending", "accepted", "offer_declined", "offer_withdrawn", "offer_rescinded", "candidate_renege"]
 
-def build_offer_versions(
-    apps: pl.DataFrame, master: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Return (offer_versions, apps) where apps may carry updated statuses for quarantine cases.
 
-    Day columns are integer offsets; the pipeline converts them to dates.
+def build_offers(apps: pl.DataFrame, master: pl.DataFrame, cfg: GeneratorConfig, rngs: RngFactory) -> pl.DataFrame:
+    """Return the current offer per application, with the day the record last changed.
+
+    Day columns are integer offsets; the pipeline converts them to dates and timestamps.
     """
     rng = rngs.stream("offers")
     oc = cfg.offers
@@ -70,193 +72,89 @@ def build_offer_versions(
     wdr = base["offer_withdrawn_day"].to_numpy()
     res = base["offer_rescinded_day"].to_numpy()
     ren = base["candidate_renege_day"].to_numpy()
-    proposed = base["proposed_start_day"].to_numpy()
+    proposed = base["planned_start_day"].to_numpy()
     start_revised = base["start_revised"].to_numpy()
     start_day = base["start_day"].to_numpy()
     app_idx = base["app_idx"].to_numpy()
     response = np.where(acc != NO_DAY, acc, np.where(dec != NO_DAY, dec, np.where(wdr != NO_DAY, wdr, NO_DAY)))
     loss = np.where(res != NO_DAY, res, ren)
 
-    rows: list[dict] = []
-
-    def add(
-        i: int,
-        cycle: int,
-        version: int,
-        reason: str,
-        status: str,
-        extended: int,
-        accepted: int = NO_DAY,
-        declined: int = NO_DAY,
-        withdrawn: int = NO_DAY,
-        rescinded: int = NO_DAY,
-        reneged: int = NO_DAY,
-        proposed_start: int = NO_DAY,
-        base_salary: int = 0,
-    ) -> None:
-        rows.append(
-            {
-                "app_idx": int(app_idx[i]),
-                "offer_cycle_number": cycle,
-                "offer_version_number": version,
-                "version_reason": reason,
-                "offer_status": status,
-                "offer_extended_day": int(extended),
-                "offer_accepted_day": int(accepted),
-                "offer_declined_day": int(declined),
-                "offer_withdrawn_day": int(withdrawn),
-                "offer_rescinded_day": int(rescinded),
-                "candidate_renege_day": int(reneged),
-                "proposed_start_day": int(proposed_start),
-                "base_salary": int(base_salary),
-            }
-        )
-
     u_neg = rng.random(n)
     u_admin = rng.random(n)
+    rows: list[dict] = []
     for i in range(n):
-        version = 1
-        extended_final = int(ext[i])
         sal = int(salary[i])
-        # proposed start is only meaningful once the candidate could accept; use it on every version
-        prop = int(proposed[i]) if proposed[i] != NO_DAY else (int(ext[i]) + 28 if ext[i] != NO_DAY else NO_DAY)
-        gap = int(response[i] - ext[i]) if response[i] != NO_DAY else (as_of - int(ext[i]))
+        extended = int(ext[i])
+        # planned start only becomes meaningful once the candidate could accept, but the
+        # letter always names one, so a pending offer carries a provisional date too
+        planned = int(proposed[i]) if proposed[i] != NO_DAY else extended + 28
+        changed = extended
+
+        # a re-negotiated letter before the candidate responds: same offer, new terms
+        gap = int(response[i] - ext[i]) if response[i] != NO_DAY else (as_of - extended)
         if u_neg[i] < oc.negotiation_revision_probability and gap >= 2:
-            rev_day = int(ext[i]) + int(rng.integers(1, gap))
-            add(i, 1, 1, "initial", "superseded", int(ext[i]), proposed_start=prop, base_salary=sal)
+            extended = extended + int(rng.integers(1, gap))
             sal = int(np.round(sal * rng.uniform(1.03, 1.08) / 500) * 500)
-            version = 2
-            extended_final = rev_day
-        reason = "initial" if version == 1 else "negotiation_revision"
+            changed = extended
+
         if acc[i] != NO_DAY:
-            add(
-                i,
-                1,
-                version,
-                reason,
-                "accepted",
-                extended_final,
-                accepted=int(acc[i]),
-                proposed_start=prop,
-                base_salary=sal,
-            )
-            last_acc_day = int(acc[i])
+            status = "accepted"
+            changed = int(acc[i])
+            # administrative edits after acceptance, applied to this same row
             limit = min(
                 as_of,
                 int(loss[i]) if loss[i] != NO_DAY else as_of,
                 int(start_day[i]) if start_day[i] != NO_DAY else as_of,
             )
-            admin: list[str] = []
+            edit = None
             if start_revised[i]:
-                admin.append("start_date_revision")
+                edit = "start_date_revision"
             elif u_admin[i] < oc.admin_revision_probability:
-                admin.append(oc.admin_revision_reasons[int(rng.integers(0, len(oc.admin_revision_reasons)))])
-                if admin[0] == "start_date_revision":
-                    admin[0] = "letter_reissue"
-            for adm in admin:
-                if last_acc_day + 2 > limit:
-                    break
-                day = int(rng.integers(last_acc_day + 2, min(last_acc_day + 15, limit) + 1))
-                version += 1
-                if adm == "start_date_revision":
-                    prop = (
+                edit = oc.admin_revision_reasons[int(rng.integers(0, len(oc.admin_revision_reasons)))]
+                if edit == "start_date_revision":
+                    edit = "letter_reissue"
+            if edit is not None and changed + 2 <= limit:
+                day = int(rng.integers(changed + 2, min(changed + 15, limit) + 1))
+                if edit == "start_date_revision":
+                    planned = (
                         int(start_day[i])
                         if start_day[i] != NO_DAY
-                        else prop
+                        else planned
                         + int(rng.integers(oc.start_date_revision_days[0], oc.start_date_revision_days[1] + 1))
                     )
-                if adm == "salary_correction":
+                elif edit == "salary_correction":
                     sal = int(np.round(sal * rng.uniform(0.99, 1.02) / 100) * 100)
-                add(i, 1, version, adm, "accepted", day, accepted=day, proposed_start=prop, base_salary=sal)
-                last_acc_day = day
-            # a post-acceptance loss is recorded on the current (last) version
-            if loss[i] != NO_DAY:
-                last = rows[-1]
-                if res[i] != NO_DAY:
-                    last["offer_status"] = "rescinded"
-                    last["offer_rescinded_day"] = int(res[i])
-                else:
-                    last["offer_status"] = "reneged"
-                    last["candidate_renege_day"] = int(ren[i])
+                changed = day
+            # a post-acceptance loss changes the status on this row; acceptance is preserved
+            if res[i] != NO_DAY:
+                status = "offer_rescinded"
+                changed = max(changed, int(res[i]))
+            elif ren[i] != NO_DAY:
+                status = "candidate_renege"
+                changed = max(changed, int(ren[i]))
         elif dec[i] != NO_DAY:
-            add(
-                i,
-                1,
-                version,
-                reason,
-                "declined",
-                extended_final,
-                declined=int(dec[i]),
-                proposed_start=prop,
-                base_salary=sal,
-            )
+            status = "offer_declined"
+            changed = int(dec[i])
         elif wdr[i] != NO_DAY:
-            add(
-                i,
-                1,
-                version,
-                reason,
-                "withdrawn",
-                extended_final,
-                withdrawn=int(wdr[i]),
-                proposed_start=prop,
-                base_salary=sal,
-            )
+            status = "offer_withdrawn"
+            changed = int(wdr[i])
         else:
-            add(i, 1, version, reason, "extended", extended_final, proposed_start=prop, base_salary=sal)
+            status = "pending"
 
-    versions = pl.DataFrame(rows)
-
-    # ------------------------------------------------------------ ambiguous second cycles
-    apps_out = apps
-    if oc.quarantine_case_count > 0:
-        candidates = (
-            base.filter((pl.col("candidate_renege_day") != NO_DAY) & (pl.col("candidate_renege_day") <= as_of - 60))
-            .select("app_idx", "candidate_renege_day", "proposed_start_day")
-            .sort("app_idx")
+        rows.append(
+            {
+                "app_idx": int(app_idx[i]),
+                "offer_status_current": status,
+                "offer_extended_day": extended,
+                "offer_accepted_day": int(acc[i]),
+                "offer_declined_day": int(dec[i]),
+                "offer_withdrawn_day": int(wdr[i]),
+                "offer_rescinded_day": int(res[i]),
+                "candidate_renege_day": int(ren[i]),
+                "planned_start_day": planned,
+                "base_salary": sal,
+                "offer_changed_day": min(changed, as_of),
+            }
         )
-        take = min(oc.quarantine_case_count, candidates.height)
-        pick = np.sort(rng.choice(candidates.height, size=take, replace=False)) if take else np.zeros(0, int)
-        chosen = candidates[pick.tolist()] if take else candidates.clear()
-        extra_rows = []
-        new_status_day: dict[int, int] = {}
-        for r in chosen.iter_rows(named=True):
-            first_loss = int(r["candidate_renege_day"])
-            ext2 = first_loss + int(rng.integers(5, 21))
-            acc2 = ext2 + int(rng.integers(1, 6))
-            loss2 = min(acc2 + int(rng.integers(3, 21)), as_of)
-            sal = int(np.round(LEVEL_BASE_SALARY[2] * rng.uniform(0.95, 1.1) / 500) * 500)
-            extra_rows.append(
-                {
-                    "app_idx": int(r["app_idx"]),
-                    "offer_cycle_number": 2,
-                    "offer_version_number": 1,
-                    "version_reason": "initial",
-                    "offer_status": "reneged",
-                    "offer_extended_day": ext2,
-                    "offer_accepted_day": acc2,
-                    "offer_declined_day": NO_DAY,
-                    "offer_withdrawn_day": NO_DAY,
-                    "offer_rescinded_day": NO_DAY,
-                    "candidate_renege_day": loss2,
-                    "proposed_start_day": acc2 + 21,
-                    "base_salary": sal,
-                }
-            )
-            new_status_day[int(r["app_idx"])] = loss2
-        if extra_rows:
-            versions = pl.concat([versions, pl.DataFrame(extra_rows)])
-            upd = pl.DataFrame({"app_idx": list(new_status_day), "status_day_new": list(new_status_day.values())})
-            apps_out = (
-                apps.join(upd, on="app_idx", how="left")
-                .with_columns(status_day=pl.coalesce(pl.col("status_day_new"), pl.col("status_day")))
-                .drop("status_day_new")
-            )
 
-    versions = versions.sort(["app_idx", "offer_cycle_number", "offer_version_number"]).with_columns(
-        is_current_version=(
-            pl.col("offer_version_number") == pl.col("offer_version_number").max().over("app_idx", "offer_cycle_number")
-        ),
-        currency=pl.lit(oc.currency),
-    )
-    return versions, apps_out
+    return pl.DataFrame(rows).sort("app_idx").with_columns(currency=pl.lit(oc.currency))

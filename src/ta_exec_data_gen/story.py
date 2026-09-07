@@ -10,8 +10,8 @@ ta-exec-db and are implemented in dbt.
 Where the contract states a population rule, this summary follows it, so that the numbers
 here can be compared with the governed marts rather than quietly differing from them:
 
-* ambiguous multiple-acceptance applications are **quarantined**, never collapsed
-  (`fct_application` business rules), so they are outside every accepted-offer figure;
+* one application contributes at most one accepted-offer event, read from the one current
+  offer row per application (`fct_application` business rules);
 * Time to Fill runs on **non-cancelled** requisitions (EXEC-05 `population`);
 * the forecast follows FCST-01..04, including the segment fallback order and the
   requisition-level cap.
@@ -44,46 +44,24 @@ def _latest_snapshot(snap: pl.DataFrame, as_of: dt.date) -> pl.DataFrame:
     )
 
 
-def quarantined_applications(tables: dict[str, pl.DataFrame]) -> pl.DataFrame:
-    """Applications carrying more than one distinct accepted offer cycle.
+def accepted_offers(tables: dict[str, pl.DataFrame]) -> pl.DataFrame:
+    """One row per application holding an accepted-offer event, with its post-acceptance loss.
 
-    The contract holds these for human review: administrative revisions of one accepted
-    offer are collapsed, but a second acceptance cycle is ambiguous and must never reach
-    the governed application fact. They therefore contribute no accepted-offer event, no
-    Time to Fill and no filled seat here either.
+    With one current offer row per application there is nothing to resolve: an acceptance
+    date is either present on that row or it is not, and a later rescind or renege leaves
+    it in place. That is the whole point of contract 1.3's current-offer grain.
     """
     return (
-        tables["ats_offer_version"]
+        tables["ats_offer"]
         .filter(pl.col("offer_accepted_date").is_not_null())
-        .group_by("application_id")
-        .agg(accepted_cycles=pl.col("offer_id").n_unique(), accepted_versions=pl.len())
-        .filter(pl.col("accepted_cycles") > 1)
+        .select(
+            "application_id",
+            "requisition_id",
+            accepted_date=pl.col("offer_accepted_date"),
+            lost=pl.col("offer_rescinded_date").is_not_null() | pl.col("candidate_renege_date").is_not_null(),
+        )
         .sort("application_id")
     )
-
-
-def accepted_offers(tables: dict[str, pl.DataFrame], *, include_quarantined: bool = False) -> pl.DataFrame:
-    """One row per application with a governed acceptance: earliest accepted date, plus loss flags.
-
-    Quarantined applications are excluded unless `include_quarantined` is set, which exists
-    only so the summary can show the size of the quarantine.
-    """
-    ov = tables["ats_offer_version"]
-    acc = (
-        ov.filter(pl.col("offer_accepted_date").is_not_null())
-        .group_by("application_id", "offer_id")
-        .agg(
-            accepted_date=pl.col("offer_accepted_date").min(),
-            lost=(pl.col("offer_rescinded_date").is_not_null() | pl.col("candidate_renege_date").is_not_null()).any(),
-        )
-        .sort(["application_id", "accepted_date"])
-        .group_by("application_id", maintain_order=True)
-        .agg(accepted_date=pl.col("accepted_date").first(), lost=pl.col("lost").last(), cycles=pl.len())
-        .join(tables["ats_application"].select("application_id", "requisition_id"), on="application_id")
-    )
-    if include_quarantined:
-        return acc
-    return acc.join(quarantined_applications(tables).select("application_id"), on="application_id", how="anti")
 
 
 SEGMENT_KEYS = ["business_unit_code", "job_family_code", "job_level_code"]
@@ -98,7 +76,7 @@ def active_pipeline(tables: dict[str, pl.DataFrame], latest: pl.DataFrame) -> pl
     segments = latest.select("requisition_id", *SEGMENT_KEYS, "requisition_status", "openings_position")
     return (
         tables["ats_application"]
-        .filter(pl.col("application_status") == "active")
+        .filter(pl.col("application_status_current") == "active")
         .select("application_id", "requisition_id", stage_code=pl.col("current_stage_code"))
         .join(segments, on="requisition_id")
         .filter(pl.col("requisition_status") == "open")
@@ -111,8 +89,7 @@ def stage_yields(tables: dict[str, pl.DataFrame], latest: pl.DataFrame, cfg: Gen
     The training target is the *active fill* - an acceptance that was not later rescinded or
     reneged - so the forecast stays on the same definition as filled positions. Only
     applications with a final outcome train the model; active candidates are what the model
-    is later asked to predict. Quarantined applications train nothing: they never reach the
-    governed application fact, which is the source this yield is defined on. A segment grain
+    is later asked to predict. A segment grain
     is used only when it has at least `story.forecast_min_segment_observations` observations,
     otherwise the next coarser grain in `YIELD_FALLBACK` applies.
 
@@ -128,11 +105,10 @@ def stage_yields(tables: dict[str, pl.DataFrame], latest: pl.DataFrame, cfg: Gen
         .select("application_id", "stage_code")
         .unique()
         .join(
-            tables["ats_application"].select("application_id", "requisition_id", "application_status"),
+            tables["ats_application"].select("application_id", "requisition_id", "application_status_current"),
             on="application_id",
         )
-        .filter(pl.col("application_status") != "active")
-        .join(quarantined_applications(tables).select("application_id"), on="application_id", how="anti")
+        .filter(pl.col("application_status_current") != "active")
         .join(segments, on="requisition_id")
         .join(active_fill, on="application_id", how="left")
         .with_columns(pl.col("is_active_fill").fill_null(False))
@@ -335,12 +311,12 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
         .sort("risk_band")
     )
     out["open_positions_by_constraint"] = (
-        open_reqs.group_by("primary_hiring_constraint")
+        open_reqs.group_by("hiring_constraint_code")
         .agg(open_positions=pl.col("openings_position").sum())
         .sort("open_positions", descending=True)
     )
     out["constraint_by_risk"] = (
-        open_reqs.group_by("risk_band", "primary_hiring_constraint")
+        open_reqs.group_by("risk_band", "hiring_constraint_code")
         .agg(open_positions=pl.col("openings_position").sum())
         .sort(["risk_band", "open_positions"], descending=[False, True])
     )
@@ -362,9 +338,9 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
     out["risk_band_by_thd_window"] = _risk_band_by_thd_window(open_reqs, as_of, cfg)
 
     # time to fill (approval -> earliest acceptance) -------------------------------------
-    # EXEC-05 population: every accepted-offer event on a NON-CANCELLED requisition, with
-    # quarantined applications already removed by accepted_offers(). Offers later rescinded
-    # or reneged stay in: Time to Fill measures the cycle TA actually completed.
+    # EXEC-05 population: every accepted-offer event on a NON-CANCELLED requisition. Offers
+    # later rescinded or reneged stay in: Time to Fill measures the cycle TA actually
+    # completed.
     non_cancelled = latest.filter(pl.col("requisition_status") != "cancelled").select("requisition_id")
     ttf = (
         acc.join(non_cancelled, on="requisition_id", how="semi")
@@ -387,28 +363,23 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
     )
     # How the source population narrows to the governed one. Each step is a contract rule,
     # so the two ends of this table are both correct answers to different questions.
-    source_acc = accepted_offers(tables, include_quarantined=True)
-    quarantined = quarantined_applications(tables)
     cancelled_drop = acc.join(non_cancelled, on="requisition_id", how="anti")
     out["time_to_fill_population"] = pl.DataFrame(
         {
             "step": [
                 "applications with an acceptance in the source",
-                "less quarantined (more than one acceptance cycle)",
                 "less acceptances on cancelled requisitions",
                 "governed EXEC-05 population",
             ],
             "applications": [
-                source_acc.height,
-                -quarantined.height,
+                acc.height,
                 -cancelled_drop.height,
                 ttf.height,
             ],
             "median_ttf_days": [
-                source_acc.join(req_attrs, on="requisition_id")
+                acc.join(req_attrs, on="requisition_id")
                 .select((pl.col("accepted_date") - pl.col("approval_date")).dt.total_days().median())
                 .item(),
-                None,
                 None,
                 ttf["ttf_days"].median(),
             ],
@@ -452,24 +423,19 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
     out["forecast_summary"] = _forecast_summary(forecast, as_of, cfg)
 
     # funnel: active snapshot, completed conversion, completed median days ------------------
-    # Quarantined applications are held out here too. They never reach the governed application
-    # fact, so their stage events are not part of the population the funnel describes; leaving
-    # them in would also give the offer stage a denominator its numerator does not share.
-    stg = (
-        tables["ats_stage_history"]
-        .join(quarantined.select("application_id"), on="application_id", how="anti")
-        .join(tables["ats_application"].select("application_id", "application_status"), on="application_id")
+    stg = tables["ats_stage_history"].join(
+        tables["ats_application"].select("application_id", "application_status_current"), on="application_id"
     )
-    stg = stg.sort(["application_id", "stage_sequence"]).with_columns(
+    stg = stg.sort(["application_id", "stage_sequence_number"]).with_columns(
         next_stage=pl.col("stage_code").shift(-1).over("application_id")
     )
     accepted_ids = acc.select("application_id").with_columns(accepted=pl.lit(True))
     stg = stg.join(accepted_ids, on="application_id", how="left").with_columns(pl.col("accepted").fill_null(False))
-    completed = stg.filter(pl.col("stage_exited_date").is_not_null()).with_columns(
+    completed = stg.filter(pl.col("stage_exit_date").is_not_null()).with_columns(
         advanced=pl.when(pl.col("stage_code") == "offer")
         .then(pl.col("accepted"))
         .otherwise(pl.col("next_stage").is_not_null()),
-        days=(pl.col("stage_exited_date") - pl.col("stage_entered_date")).dt.total_days(),
+        days=(pl.col("stage_exit_date") - pl.col("stage_entry_date")).dt.total_days(),
     )
     order = {c: i for i, c in enumerate(STAGES)}
     out["funnel_by_stage"] = (
@@ -477,7 +443,7 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
         .agg(completed=pl.len(), advanced=pl.col("advanced").sum(), median_days=pl.col("days").median())
         .with_columns(conversion=(pl.col("advanced") / pl.col("completed")).round(3))
         .join(
-            stg.filter(pl.col("stage_exited_date").is_null()).group_by("stage_code").agg(active_now=pl.len()),
+            stg.filter(pl.col("stage_exit_date").is_null()).group_by("stage_code").agg(active_now=pl.len()),
             on="stage_code",
             how="left",
         )
@@ -497,7 +463,7 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
     # 60-day early attrition by start cohort (fully matured months only) -----------------------
     hr = tables["hr_worker_event"]
     hires = (
-        hr.filter(pl.col("event_type") == "hire")
+        hr.filter(pl.col("event_type") == "start")
         .group_by("worker_id", "application_id", "requisition_id")
         .agg(start=pl.col("event_date").min())
     )
@@ -532,31 +498,29 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
         .sort("business_unit_code")
     )
 
-    # offer versions and source quirks ----------------------------------------------------------
-    ov = tables["ats_offer_version"]
-    multi = (
-        ov.filter(pl.col("offer_accepted_date").is_not_null())
-        .group_by("application_id")
-        .agg(accepted_versions=pl.len(), cycles=pl.col("offer_id").n_unique())
+    # current offers and source quirks -----------------------------------------------------------
+    off = tables["ats_offer"]
+    out["offer_profile"] = (
+        off.group_by("offer_status_current")
+        .agg(offers=pl.len(), with_acceptance=pl.col("offer_accepted_date").is_not_null().sum())
+        .sort("offer_status_current")
     )
-    out["offer_version_profile"] = pl.DataFrame(
+    out["source_profile"] = pl.DataFrame(
         {
             "measure": [
-                "applications_with_offer",
-                "offer_versions",
-                "applications_with_multiple_accepted_versions",
-                "applications_with_two_accepted_cycles (quarantine candidates)",
-                "hire_event_rows",
+                "applications_with_a_current_offer",
+                "offer_rows",
+                "applications_with_more_than_one_offer_row",
+                "start_event_rows",
                 "termination_event_rows",
                 "snapshot_rows",
                 "requisitions",
             ],
             "value": [
-                ov["application_id"].n_unique(),
-                ov.height,
-                multi.filter(pl.col("accepted_versions") > 1).height,
-                multi.filter(pl.col("cycles") > 1).height,
-                hr.filter(pl.col("event_type") == "hire").height,
+                off["application_id"].n_unique(),
+                off.height,
+                off.group_by("application_id").len().filter(pl.col("len") > 1).height,
+                hr.filter(pl.col("event_type") == "start").height,
                 hr.filter(pl.col("event_type") == "termination").height,
                 snap.height,
                 latest.height,
@@ -569,7 +533,7 @@ def summarise(tables: dict[str, pl.DataFrame], cfg: GeneratorConfig) -> dict[str
         .sort("requisition_status")
     )
     out["application_status_as_of"] = (
-        tables["ats_application"].group_by("application_status").len().sort("application_status")
+        tables["ats_application"].group_by("application_status_current").len().sort("application_status_current")
     )
     return out
 

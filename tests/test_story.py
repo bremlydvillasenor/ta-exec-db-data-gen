@@ -26,7 +26,7 @@ def test_risk_bands_and_constraints_are_populated(tables_medium, cfg_medium):
     by_risk = s["constraint_by_risk"]
     share = lambda band: (  # noqa: E731
         by_risk.filter(
-            (pl.col("risk_band") == band) & (pl.col("primary_hiring_constraint") == "no_material_constraint")
+            (pl.col("risk_band") == band) & (pl.col("hiring_constraint_code") == "no_material_constraint")
         )["open_positions"].sum()
         / max(by_risk.filter(pl.col("risk_band") == band)["open_positions"].sum(), 1)
     )
@@ -48,7 +48,7 @@ def test_funnel_bottleneck_and_active_pipeline(tables_medium, cfg_medium):
 
 def test_post_acceptance_outcomes_and_source_quirks(tables_medium, cfg_medium):
     app = tables_medium["ats_application"]
-    statuses = set(app["application_status"].unique())
+    statuses = set(app["application_status_current"].unique())
     assert {
         "candidate_renege",
         "offer_rescinded",
@@ -57,31 +57,34 @@ def test_post_acceptance_outcomes_and_source_quirks(tables_medium, cfg_medium):
         "withdrawn",
         "rejected",
         "offer_accepted",
+        "started",
         "active",
     } <= statuses
-    ov = tables_medium["ats_offer_version"]
+    off = tables_medium["ats_offer"]
     acc = accepted_offers(tables_medium)
-    multi = (
-        ov.filter(pl.col("offer_accepted_date").is_not_null())
-        .group_by("application_id")
-        .agg(versions=pl.len(), cycles=pl.col("offer_id").n_unique())
+    # every accepted-family status has exactly one preserved acceptance on its offer row
+    accepted_statuses = {"offer_accepted", "started", "offer_rescinded", "candidate_renege"}
+    assert acc.height == app.filter(pl.col("application_status_current").is_in(accepted_statuses)).height
+    assert acc["lost"].sum() == app.filter(
+        pl.col("application_status_current").is_in(["offer_rescinded", "candidate_renege"])
+    ).height
+    # an application edited after acceptance keeps one row; only its update timestamp moves
+    edited = off.filter(
+        pl.col("offer_accepted_date").is_not_null() & (pl.col("updated_at").dt.date() > pl.col("offer_accepted_date"))
     )
-    assert multi.filter((pl.col("versions") > 1) & (pl.col("cycles") == 1)).height > 0, "administrative revisions"
-    assert multi.filter(pl.col("cycles") > 1).height == cfg_medium.offers.quarantine_case_count
-    # the ambiguous cases are held out of the governed population, not collapsed into it
-    assert acc.filter(pl.col("cycles") > 1).height == 0
-    assert acc.height + cfg_medium.offers.quarantine_case_count == multi.height
-    assert set(ov["version_reason"].unique()) >= {"initial", "negotiation_revision", "start_date_revision"}
-    assert (ov["offer_status"] == "superseded").sum() > 0
+    assert edited.height > 0, "administrative revisions must advance updated_at on the same row"
+
     hr = tables_medium["hr_worker_event"]
-    hires = hr.filter(pl.col("event_type") == "hire")
-    assert hires.group_by("application_id").len().filter(pl.col("len") > 1).height > 0, "duplicate hire rows"
+    starts = hr.filter(pl.col("event_type") == "start")
+    assert starts.group_by("application_id").len().filter(pl.col("len") > 1).height > 0, "duplicate start rows"
     terms = hr.filter(pl.col("event_type") == "termination")
     assert terms.group_by("worker_id").len().filter(pl.col("len") > 1).height > 0, "duplicate termination rows"
-    pending = app.filter(pl.col("application_status") == "offer_accepted").join(
-        hires.select("application_id").unique(), on="application_id", how="anti"
+    assert starts["termination_reason"].null_count() == starts.height, "only terminations carry a reason"
+    pending = app.filter(pl.col("application_status_current") == "offer_accepted").join(
+        starts.select("application_id").unique(), on="application_id", how="anti"
     )
     assert pending.height > 0, "accepted offers waiting for a start date"
+    assert pending.height == app.filter(pl.col("application_status_current") == "offer_accepted").height
 
 
 def test_requisitions_reopen_after_post_acceptance_loss(tables_medium):

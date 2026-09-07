@@ -1,4 +1,4 @@
-"""Governed populations and the forecast story: quarantine, Time to Fill, FCST-01..04, risk windows.
+"""Governed populations and the forecast story: Time to Fill, FCST-01..04, risk windows.
 
 These are the parts of the story a configuration change could weaken without breaking any
 source-level check, so they are asserted here rather than left to inspection.
@@ -15,7 +15,6 @@ from ta_exec_data_gen.story import (
     accepted_offers,
     active_pipeline,
     expected_pipeline_fills,
-    quarantined_applications,
     stage_yields,
     summarise,
 )
@@ -29,76 +28,52 @@ def _parts(tables, cfg):
     return latest, yields, expected_pipeline_fills(tables, latest, yields)
 
 
-# ---------------------------------------------------------------- quarantine containment
-def test_quarantined_applications_never_reach_a_governed_figure(tables_medium, cfg_medium):
-    quarantined = quarantined_applications(tables_medium)
-    assert quarantined.height == cfg_medium.offers.quarantine_case_count
-    assert (quarantined["accepted_cycles"] > 1).all()
+# ---------------------------------------------------------------- one acceptance per application
+def test_one_acceptance_per_application(tables_medium, cfg_medium):
+    """Contract 1.3 scope limit: one current offer row, so one governed acceptance event.
 
+    With no version or cycle model there is nothing to resolve and nothing to quarantine;
+    what has to be proved instead is that the source cannot express a second acceptance.
+    """
+    off = tables_medium["ats_offer"]
+    assert off.group_by("application_id").len()["len"].max() == 1
     governed = accepted_offers(tables_medium)
-    raw = accepted_offers(tables_medium, include_quarantined=True)
-    assert raw.height - governed.height == quarantined.height
-    assert governed.join(quarantined, on="application_id", how="semi").height == 0
-    assert (governed["cycles"] == 1).all(), "a governed acceptance is one cycle"
-
-
-def test_quarantined_applications_do_not_train_the_yield_model(tables_medium, cfg_medium):
-    """The yield is defined on the governed application fact, which quarantined rows never reach.
-
-    A null-yield check cannot see this: the leaked rows land in the denominator of an
-    otherwise healthy segment, so the only way to catch it is to count the training rows.
-    """
-    latest, yields, _ = _parts(tables_medium, cfg_medium)
-    quarantined = quarantined_applications(tables_medium).select("application_id")
-    finished = (
-        tables_medium["ats_stage_history"]
-        .select("application_id", "stage_code")
-        .unique()
-        .join(tables_medium["ats_application"].select("application_id", "application_status"), on="application_id")
-        .filter(pl.col("application_status") != "active")
+    assert governed.height == off.filter(pl.col("offer_accepted_date").is_not_null()).height
+    assert governed["application_id"].n_unique() == governed.height
+    # a candidate/requisition pair may repeat across attempts, but never with two live fills
+    apps = tables_medium["ats_application"]
+    fills = (
+        governed.filter(~pl.col("lost"))
+        .join(apps.select("application_id", "candidate_id"), on="application_id")
+        .group_by("candidate_id")
+        .len()
     )
-    with_quarantined = dict(finished.group_by("stage_code").len().iter_rows())
-    without = dict(
-        finished.join(quarantined, on="application_id", how="anti").group_by("stage_code").len().iter_rows()
-    )
-    trained = dict(yields.select("stage_code", "n_all").unique().iter_rows())
-    for stage, expected in without.items():
-        assert trained[stage] == expected, f"{stage}: trained on {trained[stage]}, governed population is {expected}"
-        assert with_quarantined[stage] > expected, "the quarantine must actually remove rows at every stage"
+    assert fills["len"].max() == 1
 
 
-def test_quarantined_applications_do_not_enter_the_funnel_summary(tables_medium, cfg_medium):
-    """The funnel describes the governed stage-event population, so it drops the same rows.
-
-    Counting matters here for the same reason as the yield: the extra rows disappear into
-    healthy stage totals. The offer stage is the sharpest case - its numerator already came
-    from the governed acceptances, so leaving the rows in the denominator alone would make
-    the published conversion a ratio of two different populations.
-    """
-    quarantined = quarantined_applications(tables_medium).select("application_id")
-    completed = tables_medium["ats_stage_history"].filter(pl.col("stage_exited_date").is_not_null())
-    with_quarantined = dict(completed.group_by("stage_code").len().iter_rows())
-    governed = completed.join(quarantined, on="application_id", how="anti")
-    without = dict(governed.group_by("stage_code").len().iter_rows())
-
-    funnel = summarise(tables_medium, cfg_medium)["funnel_by_stage"]
-    published = dict(funnel.select("stage_code", "completed").iter_rows())
-    for stage, expected in without.items():
-        assert published[stage] == expected, f"{stage}: published {published[stage]}, governed population is {expected}"
-        assert with_quarantined[stage] > expected, "the quarantine must actually remove rows at every stage"
-
-    offer = funnel.filter(pl.col("stage_code") == "offer")
-    assert offer["advanced"].item() == accepted_offers(tables_medium).height, (
-        "offer conversion must divide governed acceptances by the governed offer population"
-    )
+def test_lost_offers_stay_in_the_extract_with_their_acceptance(tables_medium):
+    """Rescinded and reneged offers are retained, with the original acceptance preserved."""
+    off = tables_medium["ats_offer"]
+    lost = off.filter(pl.col("offer_rescinded_date").is_not_null() | pl.col("candidate_renege_date").is_not_null())
+    assert lost.height > 0
+    assert lost["offer_accepted_date"].null_count() == 0, "a post-acceptance loss never erases acceptance"
+    assert set(lost["offer_status_current"].unique()) == {"offer_rescinded", "candidate_renege"}
+    # every issued offer is present, not only the accepted ones
+    assert set(off["offer_status_current"].unique()) >= {
+        "pending",
+        "accepted",
+        "offer_declined",
+        "offer_withdrawn",
+        "offer_rescinded",
+        "candidate_renege",
+    }
 
 
 def test_time_to_fill_population_follows_the_contract(tables_medium, cfg_medium):
     s = summarise(tables_medium, cfg_medium)
     steps = s["time_to_fill_population"]["applications"].to_list()
-    assert sum(steps[:3]) == steps[3], "the reconciliation must add up"
-    assert steps[1] == -cfg_medium.offers.quarantine_case_count
-    assert steps[2] < 0, "some acceptances sit on requisitions later cancelled"
+    assert sum(steps[:2]) == steps[2], "the reconciliation must add up"
+    assert steps[1] < 0, "some acceptances sit on requisitions later cancelled"
 
     latest = _latest_snapshot(tables_medium["ats_requisition_snapshot"], cfg_medium.dates.as_of)
     cancelled = latest.filter(pl.col("requisition_status") == "cancelled").select("requisition_id")

@@ -4,7 +4,15 @@ Every month-end from the approval month to the as-of date, each requisition appe
 its state on that day: status, requested seats, open seats, cancelled seats, current
 Target Hire Date and Target Offer Acceptance Date (both can be re-baselined while the
 requisition is open past its TOAD) and the primary hiring constraint the recruiter
-recorded. Extracts stop a configurable number of days after a requisition closes.
+recorded. Retained history stops a configurable number of days after a requisition
+closes, but **the as-of extract always covers every requisition**, as the contract
+requires: a long-closed requisition reappears there unchanged, with the `updated_at` it
+had when it last really changed.
+
+`last_change_day` is the day the requisition record itself last moved — approved,
+re-baselined, cancelled, or a seat filled or reopened, or the recorded constraint
+changed. It is always on or before the snapshot date, so `updated_at` can never claim a
+change the snapshot could not yet know about.
 
 `openings_position` is a source quantity here, as the contract requires. It is computed
 from the same acceptance and loss events the application and offer files carry, so the
@@ -66,6 +74,7 @@ def build_snapshots(
         .filter(pl.col("snapshot_day") >= pl.col("approval_day"))
         .select("req_idx", "snapshot_day")
     )
+    as_of_day = idx.to_day(cfg.dates.as_of)
 
     # ------------------------------------------------------------ fills per snapshot
     accepted = apps.filter(pl.col("offer_accepted_day") != NO_DAY).select(
@@ -81,6 +90,23 @@ def build_snapshots(
         )
         .group_by("req_idx", "snapshot_day")
         .agg(fills=pl.len(), last_fill_day=pl.col("offer_accepted_day").max())
+    )
+    # every seat movement known by the snapshot date: an acceptance filled a seat, a
+    # post-acceptance loss reopened one. Both change the requisition record.
+    seat_events = (
+        grid.join(accepted, on="req_idx", how="inner")
+        .with_columns(
+            accepted_known=pl.when(pl.col("offer_accepted_day") <= pl.col("snapshot_day"))
+            .then(pl.col("offer_accepted_day"))
+            .otherwise(pl.lit(NO_DAY)),
+            loss_known=pl.when(
+                (pl.col("loss_day") != NO_DAY) & (pl.col("loss_day") <= pl.col("snapshot_day"))
+            )
+            .then(pl.col("loss_day"))
+            .otherwise(pl.lit(NO_DAY)),
+        )
+        .group_by("req_idx", "snapshot_day")
+        .agg(last_seat_event_day=pl.max_horizontal("accepted_known", "loss_known").max())
     )
 
     # ------------------------------------------------------------ pipeline evidence
@@ -136,6 +162,7 @@ def build_snapshots(
     snap = (
         grid.join(req, on="req_idx", how="left")
         .join(fills, on=["req_idx", "snapshot_day"], how="left")
+        .join(seat_events, on=["req_idx", "snapshot_day"], how="left")
         .join(evidence, on=["req_idx", "snapshot_day"], how="left")
         .join(late_active, on=["req_idx", "snapshot_day"], how="left")
         .join(niche, on="jf_code", how="left")
@@ -180,7 +207,9 @@ def build_snapshots(
         pl.when(pl.col("cancel_applied")).then(pl.col("cancel_day_sim")).otherwise(pl.col("approval_day")),
     )
     snap = snap.with_columns(closed_since=closed_since).filter(
-        (pl.col("status") == "open") | (pl.col("snapshot_day") - pl.col("closed_since") <= keep_days)
+        (pl.col("status") == "open")
+        | (pl.col("snapshot_day") - pl.col("closed_since") <= keep_days)
+        | (pl.col("snapshot_day") == as_of_day)
     )
 
     # ------------------------------------------------------------ constraint
@@ -214,11 +243,37 @@ def build_snapshots(
         )
         .sort(["req_idx", "snapshot_day"])
         .with_columns(
-            primary_hiring_constraint=pl.when(pl.col("status") == "cancelled")
+            hiring_constraint_code=pl.when(pl.col("status") == "cancelled")
             .then(pl.lit("no_material_constraint"))
             .otherwise(pl.col("open_constraint").forward_fill().over("req_idx"))
             .fill_null("no_material_constraint")
         )
+    )
+
+    # ------------------------------------------------------------ last source change
+    changed = pl.max_horizontal(
+        pl.col("approval_day"),
+        pl.when(pl.col("rebase1")).then(pl.col("rebase1_day")).otherwise(pl.lit(NO_DAY)),
+        pl.when(pl.col("rebase2")).then(pl.col("rebase2_day")).otherwise(pl.lit(NO_DAY)),
+        pl.when(pl.col("partial_applied")).then(pl.col("partial_day_sim")).otherwise(pl.lit(NO_DAY)),
+        pl.when(pl.col("cancel_applied")).then(pl.col("cancel_day_sim")).otherwise(pl.lit(NO_DAY)),
+        pl.col("last_seat_event_day").fill_null(NO_DAY),
+    )
+    snap = (
+        snap.with_columns(changed_day=changed)
+        .with_columns(
+            constraint_moved=pl.col("hiring_constraint_code")
+            != pl.col("hiring_constraint_code").shift(1).over("req_idx")
+        )
+        .with_columns(
+            # a constraint the recruiter re-recorded is a source edit too; the extract only
+            # knows it by this snapshot date
+            last_change_day=pl.when(pl.col("constraint_moved") & (pl.col("snapshot_day") > pl.col("changed_day")))
+            .then(pl.col("snapshot_day"))
+            .otherwise(pl.col("changed_day"))
+        )
+        # a record's last modification never moves backwards as later extracts are taken
+        .with_columns(last_change_day=pl.col("last_change_day").cum_max().over("req_idx"))
     )
 
     return snap.select(
@@ -232,6 +287,7 @@ def build_snapshots(
         "work_location",
         "hiring_manager_id",
         "recruiter_id",
+        "last_change_day",
         requisition_status=pl.col("status"),
         approval_day=pl.col("approval_day"),
         thd_day_snapshot=pl.col("thd"),
@@ -239,5 +295,5 @@ def build_snapshots(
         requested_positions=pl.col("requested"),
         openings_position=pl.col("openings"),
         cancelled_positions=pl.col("cancelled_positions"),
-        primary_hiring_constraint=pl.col("primary_hiring_constraint"),
+        hiring_constraint_code=pl.col("hiring_constraint_code"),
     ).sort(["snapshot_day", "requisition_id"])

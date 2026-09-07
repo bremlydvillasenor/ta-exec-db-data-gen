@@ -4,10 +4,28 @@
 
 seed: 20260531
 
+# Which ta-exec-db release and commit this configuration implements. Recorded in the
+# run manifest so a delivered dataset always names the contract it was built against.
+contract:
+  repository: bremlydvillasenor/ta-exec-db
+  release: "1.3"
+  commit: 87f8cf26795e0d15c1a57f14bf7fb485e959fcc5
+
 dates:
   history_start: 2024-01-01      # first day any actual ATS / HR event may occur
   as_of: 2026-05-31              # reporting as-of date; no actual event after this day
   future_thd_end: 2027-05-31     # latest Target Hire Date preserved as planned demand
+
+# Raw extraction and change metadata. These are UTC timestamps, never business dates,
+# and never a metric date basis. Configuring extracted_at (instead of reading the clock)
+# is what keeps the batch reproducible.
+timestamps:
+  extracted_at: 2026-05-31T23:59:59Z      # export time stamped on every row of every file
+  reference_updated_at: 2023-12-01T09:00:00Z  # last label/code change on the lookup files
+  change_hour_min: 8             # updated_at falls inside this UTC hour window on the
+  change_hour_max: 20            # day the record actually changed
+  updated_at_available: true     # a real export without a reliable change timestamp sets
+                                 # this to false and is reloaded by full comparison
 
 output:
   directory: data/raw
@@ -55,7 +73,8 @@ requisitions:
   rebaseline_delay_days: [7, 30]
   rebaseline_shift_days: [45, 90]
   second_rebaseline_probability: 0.35
-  snapshot_keep_days_after_close: 120        # monthly extracts stop this long after closure
+  snapshot_keep_days_after_close: 120        # monthly extracts stop this long after closure;
+                                             # the as-of extract still covers every requisition
   recruiter_count: 22
   hiring_manager_count: 160
   locations: [Austin, Toronto, London, Dublin, Berlin, Remote]
@@ -77,17 +96,22 @@ funnel:
                                              # share is lower because the donor must be an earlier
                                              # application and must not create an impossible person
                                              # (two live acceptances, or applying while already hired)
+  reapplication_share: 0.03                  # draw rate for a genuine second attempt at the SAME
+                                             # requisition after an earlier attempt was lost. The
+                                             # contract allows the candidate/requisition pair to
+                                             # repeat; the second attempt gets a new application id
   disposition_reasons:
     rejected: [not_qualified, experience_mismatch, assessment_failed, interview_feedback, position_filled]
     withdrawn: [accepted_other_offer, no_response, compensation_expectations, location, personal]
 
 # ------------------------------------------------------------------ offers and post-acceptance
 offers:
-  negotiation_revision_probability: 0.18     # a revised (superseded) version before acceptance
-  admin_revision_probability: 0.14           # accepted offer re-issued after acceptance (salary correction, moved start, letter)
+  # Contract 1.3 keeps ONE current offer row per application. A revision therefore edits
+  # that row and advances updated_at; it never creates a second offer or acceptance.
+  negotiation_revision_probability: 0.18     # salary revised and the letter re-issued before the candidate responds
+  admin_revision_probability: 0.14           # accepted offer edited afterwards (salary correction, moved start, letter re-issue)
   admin_revision_reasons: [start_date_revision, salary_correction, letter_reissue]
   start_date_revision_days: [7, 21]
-  quarantine_case_count: 4                   # applications carrying two distinct accepted offer cycles (ambiguous, for the dbt audit model)
   base_rescind_probability: 0.012
   currency: USD
 

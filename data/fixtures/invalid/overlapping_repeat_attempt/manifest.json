@@ -1,0 +1,857 @@
+{
+  "contract": {
+    "repository": "bremlydvillasenor/ta-exec-db",
+    "release": "1.3",
+    "commit": "87f8cf26795e0d15c1a57f14bf7fb485e959fcc5"
+  },
+  "generator": {
+    "package": "ta-exec-data-gen",
+    "commit": "5e4e03e6ce9089cd566864af31ac9656361f71e3",
+    "working_tree_clean": true
+  },
+  "seed": 20260531,
+  "config_fingerprint": "c5375b451520d698",
+  "as_of_date": "2026-05-31",
+  "history_start_date": "2024-01-01",
+  "future_thd_end_date": "2027-05-31",
+  "extracted_at": "2026-05-31T23:59:59Z",
+  "updated_at_available": true,
+  "business_cutoff": "2026-05-31T23:59:59Z",
+  "extract_mode": "complete",
+  "validation": {
+    "status": "expected_failure",
+    "case": "overlapping_repeat_attempt",
+    "expected_check_contains": "a repeated attempt starts after the previous one ended"
+  },
+  "effective_configuration": {
+    "seed": 20260531,
+    "contract": {
+      "repository": "bremlydvillasenor/ta-exec-db",
+      "release": "1.3",
+      "commit": "87f8cf26795e0d15c1a57f14bf7fb485e959fcc5"
+    },
+    "dates": {
+      "history_start": "2024-01-01",
+      "as_of": "2026-05-31",
+      "future_thd_end": "2027-05-31"
+    },
+    "timestamps": {
+      "extracted_at": "2026-05-31T23:59:59",
+      "reference_updated_at": "2023-12-01T09:00:00",
+      "change_hour_min": 8,
+      "change_hour_max": 20,
+      "updated_at_available": true
+    },
+    "output": {
+      "directory": "data/raw"
+    },
+    "demand": {
+      "base_positions_per_month": 1.0,
+      "monthly_growth_rate": 0.015,
+      "seasonality": [
+        1.15,
+        1.1,
+        1.05,
+        1.0,
+        0.95,
+        0.9,
+        0.85,
+        0.9,
+        1.05,
+        1.0,
+        0.9,
+        0.8
+      ],
+      "approval_lead_days": {
+        "min": 25,
+        "mode": 60,
+        "max": 200
+      },
+      "early_plan_share": 0.15,
+      "early_plan_lead_days": {
+        "min": 150,
+        "mode": 260,
+        "max": 450
+      },
+      "min_thd_gap_days": 21
+    },
+    "episodes": {
+      "hiring_surge": {
+        "start": "2025-05-01",
+        "end": "2025-08-31",
+        "demand_multiplier": 1.3,
+        "cycle_time_multiplier": 0.78,
+        "pass_rate_multiplier": 1.12,
+        "early_attrition_multiplier": 2.3
+      },
+      "hiring_freeze": {
+        "start": "2024-10-01",
+        "end": "2024-11-30",
+        "cancellation_probability": 0.22,
+        "rescind_multiplier": 6.0
+      }
+    },
+    "requisitions": {
+      "base_cancellation_probability": 0.05,
+      "cancellation_day_range": [
+        15,
+        120
+      ],
+      "stale_cancel_probability": 0.65,
+      "stale_cancel_days_after_thd": [
+        120,
+        240
+      ],
+      "partial_cancel_probability": 0.07,
+      "partial_cancel_day_range": [
+        60,
+        200
+      ],
+      "rebaseline_probability": 0.4,
+      "rebaseline_delay_days": [
+        7,
+        30
+      ],
+      "rebaseline_shift_days": [
+        45,
+        90
+      ],
+      "second_rebaseline_probability": 0.35,
+      "snapshot_keep_days_after_close": 120,
+      "recruiter_count": 22,
+      "hiring_manager_count": 160,
+      "locations": [
+        "Austin",
+        "Toronto",
+        "London",
+        "Dublin",
+        "Berlin",
+        "Remote"
+      ]
+    },
+    "funnel": {
+      "stages": [
+        "review",
+        "screen",
+        "assessment",
+        "interview",
+        "offer"
+      ],
+      "stage_sla_days": [
+        3,
+        4,
+        4,
+        5,
+        3
+      ],
+      "duration_sigma": 0.55,
+      "burst_window_days": 45,
+      "trickle_rate_share": 0.2,
+      "reopen_burst_share": 0.6,
+      "max_applications_per_requisition": 400,
+      "pipeline_cut_lag_days": [
+        0,
+        7
+      ],
+      "cut_withdrawn_share": 0.2,
+      "withdrawn_share_of_exits": 0.18,
+      "offer_withdrawn_share": 0.04,
+      "candidate_pool_reuse": 0.12,
+      "reapplication_share": 0.03,
+      "disposition_reasons": {
+        "rejected": [
+          "not_qualified",
+          "experience_mismatch",
+          "assessment_failed",
+          "interview_feedback",
+          "position_filled"
+        ],
+        "withdrawn": [
+          "accepted_other_offer",
+          "no_response",
+          "compensation_expectations",
+          "location",
+          "personal"
+        ]
+      }
+    },
+    "offers": {
+      "negotiation_revision_probability": 0.18,
+      "admin_revision_probability": 0.14,
+      "admin_revision_reasons": [
+        "start_date_revision",
+        "salary_correction",
+        "letter_reissue"
+      ],
+      "start_date_revision_days": [
+        7,
+        21
+      ],
+      "base_rescind_probability": 0.012,
+      "currency": "USD"
+    },
+    "hr": {
+      "duplicate_hire_event_share": 0.02,
+      "duplicate_termination_share": 0.03,
+      "duplicate_termination_shift_days": [
+        1,
+        10
+      ],
+      "late_attrition_annual_rate": 0.14,
+      "early_tenure_days": [
+        3,
+        60
+      ],
+      "termination_reasons": {
+        "early": [
+          "voluntary_resignation",
+          "voluntary_resignation",
+          "voluntary_resignation",
+          "involuntary_performance",
+          "involuntary_probation"
+        ],
+        "late": [
+          "voluntary_resignation",
+          "voluntary_resignation",
+          "involuntary_performance",
+          "involuntary_restructuring"
+        ]
+      }
+    },
+    "story": {
+      "forecast_min_segment_observations": 30,
+      "fill_rate_target": 0.9,
+      "risk_high_max_days": 7,
+      "risk_medium_max_days": 14
+    },
+    "business_units": [
+      {
+        "code": "ENG",
+        "name": "Engineering",
+        "weight": 0.32,
+        "sort_order": 1
+      },
+      {
+        "code": "PRD",
+        "name": "Product & Marketing",
+        "weight": 0.11,
+        "sort_order": 2
+      },
+      {
+        "code": "SAL",
+        "name": "Sales",
+        "weight": 0.22,
+        "sort_order": 3
+      },
+      {
+        "code": "CSX",
+        "name": "Customer Success",
+        "weight": 0.14,
+        "sort_order": 4
+      },
+      {
+        "code": "OPS",
+        "name": "Operations",
+        "weight": 0.13,
+        "sort_order": 5
+      },
+      {
+        "code": "GNA",
+        "name": "General & Administrative",
+        "weight": 0.08,
+        "sort_order": 6
+      }
+    ],
+    "business_unit_job_family_mix": {
+      "ENG": {
+        "SWE": 0.62,
+        "DAT": 0.22,
+        "ITS": 0.16
+      },
+      "PRD": {
+        "PDM": 0.45,
+        "MKT": 0.45,
+        "DAT": 0.1
+      },
+      "SAL": {
+        "SLS": 0.85,
+        "MKT": 0.05,
+        "OPS": 0.1
+      },
+      "CSX": {
+        "CSM": 0.8,
+        "OPS": 0.15,
+        "DAT": 0.05
+      },
+      "OPS": {
+        "OPS": 0.75,
+        "ITS": 0.1,
+        "DAT": 0.15
+      },
+      "GNA": {
+        "FIN": 0.45,
+        "PPL": 0.4,
+        "ITS": 0.15
+      }
+    },
+    "job_levels": [
+      {
+        "code": "L1",
+        "name": "Associate",
+        "level_rank": 1,
+        "weight": 0.16,
+        "duration_multiplier": 0.85,
+        "interview_pass_multiplier": 1.05,
+        "toad_lead_days": 21,
+        "notice_days": 14,
+        "attrition_multiplier": 1.35
+      },
+      {
+        "code": "L2",
+        "name": "Professional",
+        "level_rank": 2,
+        "weight": 0.33,
+        "duration_multiplier": 0.95,
+        "interview_pass_multiplier": 1.0,
+        "toad_lead_days": 30,
+        "notice_days": 21,
+        "attrition_multiplier": 1.1
+      },
+      {
+        "code": "L3",
+        "name": "Senior",
+        "level_rank": 3,
+        "weight": 0.29,
+        "duration_multiplier": 1.05,
+        "interview_pass_multiplier": 0.95,
+        "toad_lead_days": 30,
+        "notice_days": 30,
+        "attrition_multiplier": 0.9
+      },
+      {
+        "code": "L4",
+        "name": "Lead",
+        "level_rank": 4,
+        "weight": 0.12,
+        "duration_multiplier": 1.2,
+        "interview_pass_multiplier": 0.88,
+        "toad_lead_days": 45,
+        "notice_days": 30,
+        "attrition_multiplier": 0.75
+      },
+      {
+        "code": "L5",
+        "name": "Manager",
+        "level_rank": 5,
+        "weight": 0.07,
+        "duration_multiplier": 1.35,
+        "interview_pass_multiplier": 0.82,
+        "toad_lead_days": 60,
+        "notice_days": 45,
+        "attrition_multiplier": 0.65
+      },
+      {
+        "code": "L6",
+        "name": "Director",
+        "level_rank": 6,
+        "weight": 0.03,
+        "duration_multiplier": 1.6,
+        "interview_pass_multiplier": 0.75,
+        "toad_lead_days": 75,
+        "notice_days": 60,
+        "attrition_multiplier": 0.55
+      }
+    ],
+    "job_families": [
+      {
+        "code": "SWE",
+        "name": "Software Engineering",
+        "role_title": "Software Engineer",
+        "sort_order": 1,
+        "apps_per_position": 10.0,
+        "stage_pass": [
+          0.5,
+          0.66,
+          0.6,
+          0.38
+        ],
+        "offer_accept_rate": 0.78,
+        "stage_duration_median_days": [
+          4.0,
+          5.0,
+          7.0,
+          13.0,
+          4.0
+        ],
+        "multi_position_probability": 0.18,
+        "max_positions": 3,
+        "renege_rate": 0.045,
+        "early_attrition_rate": 0.032,
+        "niche_share": 0.45,
+        "constraint_weights": {
+          "qualified_candidates": 0.3,
+          "hiring_manager_delay": 0.15,
+          "compensation": 0.2,
+          "interview_capacity": 0.2,
+          "niche_skills": 0.1,
+          "candidate_availability": 0.05
+        }
+      },
+      {
+        "code": "DAT",
+        "name": "Data & Analytics",
+        "role_title": "Data Engineer",
+        "sort_order": 2,
+        "apps_per_position": 7.0,
+        "stage_pass": [
+          0.45,
+          0.6,
+          0.55,
+          0.34
+        ],
+        "offer_accept_rate": 0.72,
+        "stage_duration_median_days": [
+          5.0,
+          6.0,
+          8.0,
+          15.0,
+          5.0
+        ],
+        "multi_position_probability": 0.12,
+        "max_positions": 3,
+        "renege_rate": 0.05,
+        "early_attrition_rate": 0.04,
+        "niche_share": 0.65,
+        "constraint_weights": {
+          "qualified_candidates": 0.25,
+          "hiring_manager_delay": 0.1,
+          "compensation": 0.25,
+          "interview_capacity": 0.1,
+          "niche_skills": 0.25,
+          "candidate_availability": 0.05
+        }
+      },
+      {
+        "code": "ITS",
+        "name": "IT & Security",
+        "role_title": "IT Systems Engineer",
+        "sort_order": 3,
+        "apps_per_position": 9.0,
+        "stage_pass": [
+          0.5,
+          0.65,
+          0.6,
+          0.42
+        ],
+        "offer_accept_rate": 0.8,
+        "stage_duration_median_days": [
+          4.0,
+          5.0,
+          6.0,
+          11.0,
+          4.0
+        ],
+        "multi_position_probability": 0.15,
+        "max_positions": 3,
+        "renege_rate": 0.04,
+        "early_attrition_rate": 0.045,
+        "niche_share": 0.4,
+        "constraint_weights": {
+          "qualified_candidates": 0.3,
+          "hiring_manager_delay": 0.2,
+          "compensation": 0.15,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.15,
+          "candidate_availability": 0.05
+        }
+      },
+      {
+        "code": "PDM",
+        "name": "Product Management",
+        "role_title": "Product Manager",
+        "sort_order": 4,
+        "apps_per_position": 13.0,
+        "stage_pass": [
+          0.45,
+          0.6,
+          0.55,
+          0.36
+        ],
+        "offer_accept_rate": 0.8,
+        "stage_duration_median_days": [
+          5.0,
+          6.0,
+          7.0,
+          14.0,
+          4.0
+        ],
+        "multi_position_probability": 0.08,
+        "max_positions": 2,
+        "renege_rate": 0.04,
+        "early_attrition_rate": 0.04,
+        "niche_share": 0.3,
+        "constraint_weights": {
+          "qualified_candidates": 0.3,
+          "hiring_manager_delay": 0.3,
+          "compensation": 0.15,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.05,
+          "candidate_availability": 0.05
+        }
+      },
+      {
+        "code": "MKT",
+        "name": "Marketing",
+        "role_title": "Marketing Specialist",
+        "sort_order": 5,
+        "apps_per_position": 18.0,
+        "stage_pass": [
+          0.5,
+          0.66,
+          0.6,
+          0.46
+        ],
+        "offer_accept_rate": 0.86,
+        "stage_duration_median_days": [
+          4.0,
+          5.0,
+          5.0,
+          9.0,
+          3.0
+        ],
+        "multi_position_probability": 0.15,
+        "max_positions": 3,
+        "renege_rate": 0.045,
+        "early_attrition_rate": 0.065,
+        "niche_share": 0.1,
+        "constraint_weights": {
+          "qualified_candidates": 0.25,
+          "hiring_manager_delay": 0.35,
+          "compensation": 0.15,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.02,
+          "candidate_availability": 0.08
+        }
+      },
+      {
+        "code": "SLS",
+        "name": "Sales",
+        "role_title": "Account Executive",
+        "sort_order": 6,
+        "apps_per_position": 16.0,
+        "stage_pass": [
+          0.56,
+          0.7,
+          0.6,
+          0.5
+        ],
+        "offer_accept_rate": 0.82,
+        "stage_duration_median_days": [
+          3.0,
+          4.0,
+          5.0,
+          7.0,
+          3.0
+        ],
+        "multi_position_probability": 0.55,
+        "max_positions": 8,
+        "renege_rate": 0.07,
+        "early_attrition_rate": 0.1,
+        "niche_share": 0.05,
+        "constraint_weights": {
+          "qualified_candidates": 0.25,
+          "hiring_manager_delay": 0.2,
+          "compensation": 0.3,
+          "interview_capacity": 0.1,
+          "niche_skills": 0.02,
+          "candidate_availability": 0.13
+        }
+      },
+      {
+        "code": "CSM",
+        "name": "Customer Success",
+        "role_title": "Customer Success Manager",
+        "sort_order": 7,
+        "apps_per_position": 17.0,
+        "stage_pass": [
+          0.56,
+          0.7,
+          0.62,
+          0.5
+        ],
+        "offer_accept_rate": 0.85,
+        "stage_duration_median_days": [
+          3.0,
+          4.0,
+          5.0,
+          7.0,
+          3.0
+        ],
+        "multi_position_probability": 0.45,
+        "max_positions": 6,
+        "renege_rate": 0.06,
+        "early_attrition_rate": 0.085,
+        "niche_share": 0.05,
+        "constraint_weights": {
+          "qualified_candidates": 0.25,
+          "hiring_manager_delay": 0.25,
+          "compensation": 0.2,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.02,
+          "candidate_availability": 0.13
+        }
+      },
+      {
+        "code": "OPS",
+        "name": "Operations",
+        "role_title": "Operations Specialist",
+        "sort_order": 8,
+        "apps_per_position": 20.0,
+        "stage_pass": [
+          0.56,
+          0.72,
+          0.62,
+          0.52
+        ],
+        "offer_accept_rate": 0.88,
+        "stage_duration_median_days": [
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          3.0
+        ],
+        "multi_position_probability": 0.5,
+        "max_positions": 8,
+        "renege_rate": 0.05,
+        "early_attrition_rate": 0.08,
+        "niche_share": 0.05,
+        "constraint_weights": {
+          "qualified_candidates": 0.25,
+          "hiring_manager_delay": 0.25,
+          "compensation": 0.15,
+          "interview_capacity": 0.2,
+          "niche_skills": 0.02,
+          "candidate_availability": 0.13
+        }
+      },
+      {
+        "code": "FIN",
+        "name": "Finance",
+        "role_title": "Financial Analyst",
+        "sort_order": 9,
+        "apps_per_position": 12.0,
+        "stage_pass": [
+          0.5,
+          0.65,
+          0.6,
+          0.45
+        ],
+        "offer_accept_rate": 0.82,
+        "stage_duration_median_days": [
+          4.0,
+          5.0,
+          6.0,
+          10.0,
+          4.0
+        ],
+        "multi_position_probability": 0.1,
+        "max_positions": 2,
+        "renege_rate": 0.04,
+        "early_attrition_rate": 0.05,
+        "niche_share": 0.2,
+        "constraint_weights": {
+          "qualified_candidates": 0.3,
+          "hiring_manager_delay": 0.3,
+          "compensation": 0.15,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.05,
+          "candidate_availability": 0.05
+        }
+      },
+      {
+        "code": "PPL",
+        "name": "People & Talent",
+        "role_title": "People Partner",
+        "sort_order": 10,
+        "apps_per_position": 14.0,
+        "stage_pass": [
+          0.5,
+          0.65,
+          0.6,
+          0.45
+        ],
+        "offer_accept_rate": 0.85,
+        "stage_duration_median_days": [
+          4.0,
+          5.0,
+          6.0,
+          9.0,
+          3.0
+        ],
+        "multi_position_probability": 0.1,
+        "max_positions": 2,
+        "renege_rate": 0.04,
+        "early_attrition_rate": 0.055,
+        "niche_share": 0.1,
+        "constraint_weights": {
+          "qualified_candidates": 0.3,
+          "hiring_manager_delay": 0.3,
+          "compensation": 0.15,
+          "interview_capacity": 0.15,
+          "niche_skills": 0.02,
+          "candidate_availability": 0.08
+        }
+      }
+    ],
+    "hiring_constraints": [
+      "qualified_candidates",
+      "hiring_manager_delay",
+      "compensation",
+      "interview_capacity",
+      "niche_skills",
+      "candidate_availability",
+      "no_material_constraint"
+    ]
+  },
+  "tables": {
+    "ats_business_unit": {
+      "file": "ats_business_unit.csv",
+      "rows": 6,
+      "columns": [
+        "business_unit_code",
+        "business_unit_name",
+        "sort_order",
+        "is_active",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "defd3c788a7a213209cd324e84b8fa58c272d06d7e3ce4783aa7e1d77bab2d7b"
+    },
+    "ats_job_family": {
+      "file": "ats_job_family.csv",
+      "rows": 10,
+      "columns": [
+        "job_family_code",
+        "job_family_name",
+        "sort_order",
+        "is_active",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "da5da606923d401d8e832fca5bbfa8a50ccd85e5a86f85d3944e726be6133433"
+    },
+    "ats_job_level": {
+      "file": "ats_job_level.csv",
+      "rows": 6,
+      "columns": [
+        "job_level_code",
+        "job_level_name",
+        "level_rank",
+        "is_active",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "7f6ddcd5184d908ec8c0187bf6500594f0218f8c96eec14d711ab4b2082c4d78"
+    },
+    "ats_requisition_snapshot": {
+      "file": "ats_requisition_snapshot.csv",
+      "rows": 163,
+      "columns": [
+        "snapshot_date",
+        "requisition_id",
+        "requisition_title",
+        "business_unit_code",
+        "job_family_code",
+        "job_level_code",
+        "work_location",
+        "hiring_manager_id",
+        "recruiter_id",
+        "requisition_status",
+        "approval_date",
+        "target_hire_date",
+        "target_offer_acceptance_date",
+        "requested_positions",
+        "openings_position",
+        "cancelled_positions",
+        "hiring_constraint_code",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "eb6a745a9629d6aa3d180fd4daf8e326b807f65855264f975e0123530ca68f72"
+    },
+    "ats_application": {
+      "file": "ats_application.csv",
+      "rows": 465,
+      "columns": [
+        "application_id",
+        "candidate_id",
+        "requisition_id",
+        "application_date",
+        "source_channel",
+        "application_status_current",
+        "current_stage_code",
+        "rejected_date",
+        "withdrawal_date",
+        "disposition_reason",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "e44c8ac311bd3e620229cd6b4a88a2f632fd1e896569c1f979ce381a9ac31d24"
+    },
+    "ats_stage_history": {
+      "file": "ats_stage_history.csv",
+      "rows": 985,
+      "columns": [
+        "stage_event_id",
+        "application_id",
+        "stage_code",
+        "stage_sequence_number",
+        "stage_entry_date",
+        "stage_exit_date",
+        "exit_reason",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "47996644ce418ada91b0399f1b77e5f075cc474005b077180da8fc545036c1ff"
+    },
+    "ats_offer": {
+      "file": "ats_offer.csv",
+      "rows": 33,
+      "columns": [
+        "application_id",
+        "requisition_id",
+        "offer_status_current",
+        "offer_extended_date",
+        "offer_accepted_date",
+        "offer_declined_date",
+        "offer_withdrawn_date",
+        "offer_rescinded_date",
+        "candidate_renege_date",
+        "planned_start_date",
+        "base_salary",
+        "currency",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "af38000a0ff6f28fca5f191099351f7d736c141d697dc1bea41ee978242ab85d"
+    },
+    "hr_worker_event": {
+      "file": "hr_worker_event.csv",
+      "rows": 31,
+      "columns": [
+        "worker_event_id",
+        "worker_id",
+        "candidate_id",
+        "application_id",
+        "requisition_id",
+        "event_type",
+        "event_date",
+        "termination_reason",
+        "updated_at",
+        "extracted_at"
+      ],
+      "sha256": "1b6ab44a2312ba23e95aa6d51c4ae37e934aacf340cf96f60407b9fb350a3bc3"
+    }
+  }
+}

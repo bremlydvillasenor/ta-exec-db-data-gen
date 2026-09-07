@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -28,6 +28,46 @@ class DatesConfig(StrictModel):
 
 class OutputConfig(StrictModel):
     directory: str = "data/raw"
+
+
+class ContractConfig(StrictModel):
+    """Which ta-exec-db release and commit this run implements (recorded in the manifest)."""
+
+    repository: str = "bremlydvillasenor/ta-exec-db"
+    release: str
+    commit: str
+
+
+class TimestampsConfig(StrictModel):
+    """Raw extraction and update metadata, kept apart from business dates.
+
+    `extracted_at` is the export time of the whole batch and is configured rather than
+    read from the clock, so the same seed and configuration reproduce identical files.
+    `updated_at` is derived per row from the day that record last changed; the clock time
+    inside that day comes from the record key, and never from wall-clock time.
+    """
+
+    extracted_at: dt.datetime
+    reference_updated_at: dt.datetime
+    change_hour_min: int = Field(ge=0, le=23)
+    change_hour_max: int = Field(ge=1, le=24)
+    updated_at_available: bool = True
+
+    @field_validator("extracted_at", "reference_updated_at", mode="before")
+    @classmethod
+    def _utc_naive(cls, value: Any) -> Any:
+        """Accept `2026-05-31T23:59:59Z` and keep it as naive UTC internally."""
+        if isinstance(value, str):
+            value = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if isinstance(value, dt.datetime) and value.tzinfo is not None:
+            value = value.astimezone(dt.UTC).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def _hours(self) -> TimestampsConfig:
+        if self.change_hour_min >= self.change_hour_max:
+            raise ValueError("change_hour_min must be below change_hour_max")
+        return self
 
 
 class TriangularDays(StrictModel):
@@ -108,15 +148,18 @@ class FunnelConfig(StrictModel):
     withdrawn_share_of_exits: float = Field(ge=0, le=1)
     offer_withdrawn_share: float = Field(ge=0, le=1)
     candidate_pool_reuse: float = Field(ge=0, le=1)
+    reapplication_share: float = Field(ge=0, le=1)
     disposition_reasons: DispositionReasons
 
 
 class OffersConfig(StrictModel):
+    """Offer behaviour. Contract 1.3 keeps one current offer row per application, so a
+    revision changes that row and advances `updated_at` instead of adding a version."""
+
     negotiation_revision_probability: float = Field(ge=0, le=1)
     admin_revision_probability: float = Field(ge=0, le=1)
     admin_revision_reasons: list[str] = Field(min_length=1)
     start_date_revision_days: tuple[int, int]
-    quarantine_case_count: int = Field(ge=0)
     base_rescind_probability: float = Field(ge=0, le=1)
     currency: str = "USD"
 
@@ -188,7 +231,9 @@ class StoryConfig(StrictModel):
 
 class GeneratorConfig(StrictModel):
     seed: int
+    contract: ContractConfig
     dates: DatesConfig
+    timestamps: TimestampsConfig
     output: OutputConfig = OutputConfig()
     demand: DemandConfig
     episodes: EpisodesConfig
@@ -228,6 +273,11 @@ class GeneratorConfig(StrictModel):
         ranks = [jl.level_rank for jl in self.job_levels]
         if len(set(ranks)) != len(ranks):
             raise ValueError("job level ranks must be unique")
+        cutoff = dt.datetime.combine(self.dates.as_of, dt.time(23, 59, 59))
+        if self.timestamps.extracted_at < cutoff:
+            raise ValueError("timestamps.extracted_at must be at or after the end of the as-of day")
+        if self.timestamps.reference_updated_at > self.timestamps.extracted_at:
+            raise ValueError("timestamps.reference_updated_at must not be after extracted_at")
         return self
 
     # convenience lookups -------------------------------------------------
