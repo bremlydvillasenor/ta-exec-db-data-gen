@@ -48,13 +48,21 @@ def generator_commit() -> str | None:
     return out.strip() if out else None
 
 
+# what the answer to "did this run from a committed state" depends on
+GENERATOR_PATHS = ("src", "config", "pyproject.toml", "uv.lock")
+
+
 def working_tree_clean() -> bool | None:
-    """Whether the generator ran from a committed state.
+    """Whether the generator's own code ran from a committed state.
 
     A dirty tree means `generator.commit` does not fully describe the code that produced
-    the batch, so the manifest says so rather than implying a reproducible build.
+    the batch, so the manifest says so rather than implying a reproducible build. Only the
+    source and configuration decide that. Writing this batch's files into the working tree
+    does not make the generator unreproducible, and counting them would make the answer
+    depend on write order - the first fixture written would claim a clean tree and the rest,
+    dirtied by it, would not.
     """
-    out = _git("status", "--porcelain")
+    out = _git("status", "--porcelain", "--", *GENERATOR_PATHS)
     return out.strip() == "" if out is not None else None
 
 
