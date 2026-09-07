@@ -6,7 +6,7 @@
   },
   "generator": {
     "package": "ta-exec-data-gen",
-    "commit": "5362f6e5c0d0b18fe4c7394ae4666f1591fa426b",
+    "commit": "c7615dc04ed66f3cd7b9f0ff5b4f604ea9d808c6",
     "working_tree_clean": true
   },
   "seed": 20260531,
@@ -20,7 +20,7 @@
   "extract_mode": "complete",
   "validation": {
     "status": "passed",
-    "checks": 160,
+    "checks": 161,
     "failed_checks": []
   },
   "effective_configuration": {
